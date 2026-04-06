@@ -19,10 +19,8 @@
 
 프로그램 실행을 위해 필요한 라이브러리를 터미널(CMD)에서 설치해야 합니다.
 
-```bash
-# 필수 라이브러리 설치
-pip install PyQt5 torch torchvision opencv-python basicsr realesrgan
-```
+    # 필수 라이브러리 설치
+    pip install PyQt5 torch torchvision opencv-python basicsr realesrgan
 
 > 참고: NVIDIA 그래픽카드를 사용 중이라면 CUDA Toolkit을 설치하여 하드웨어 가속을 사용할 수 있습니다.
 
@@ -32,9 +30,7 @@ pip install PyQt5 torch torchvision opencv-python basicsr realesrgan
 
 터미널 또는 명령 프롬프트에서 프로젝트 폴더로 이동한 뒤 아래 명령어를 입력합니다.
 
-```bash
-python Launch.py
-```
+    python Launch.py
 
 ---
 
@@ -72,3 +68,76 @@ python Launch.py
 본 프로그램은 오픈소스 알고리즘인 Real-ESRGAN을 활용합니다.
 
 * 알고리즘 상세 정보: https://github.com/xinntao/Real-ESRGAN
+
+---
+
+# 🚀 AI Upscaler Project
+
+This project is a desktop application based on the Real-ESRGAN algorithm, designed to enhance the quality of images and videos. With a user-friendly GUI, anyone can easily perform high-resolution upscaling.
+
+---
+
+## 📂 1. Project Structure
+
+This program consists of 4 Python files. All files must be located in the same folder.
+
+* **Launch.py**: Main entry point of the program. Manages the GUI interface and tab structure.
+* **setting.py**: Contains theme (dark/light) design and hardware detection logic (GPU/CPU).
+* **UpscaleImg.py**: Dedicated module for image upscaling.
+* **UpscaleVid.py**: Dedicated module that splits videos into parts and upscales them.
+
+---
+
+## 🛠 2. Installation
+
+To run the program, install the required libraries via terminal (CMD):
+
+    # Install required libraries
+    pip install PyQt5 torch torchvision opencv-python basicsr realesrgan
+
+> Note: If you are using an NVIDIA GPU, install CUDA Toolkit to enable hardware acceleration.
+
+---
+
+## 🚀 3. Execution
+
+Navigate to the project folder in your terminal or command prompt and run:
+
+    python Launch.py
+
+---
+
+## 🖥 4. Manual
+
+### 🖼 Image Upscale (Image Tab)
+
+* **Input Image**: Click “Browse” to select the original image.
+* **Output Folder**: Select the folder where results will be saved.
+* **Scale Factor**: Choose 2x, 4x, or 8x.
+* **Run**: Click “Upscale Image”.
+
+---
+
+### 🎬 Video Upscale (Video Tab)
+
+* **Split Count**: Number of segments to divide the video into (Higher values recommended for low-spec PCs)
+* **Target Parts**: Enter part indices to process (e.g., 0 or 0,1,2)
+* **Tile Size**: If VRAM is limited, use 100–400 (0 = full processing)
+* **Run**: Click “Start Video Upscaling”.
+
+---
+
+## 💡 Features & Tips
+
+* **Theme Switching**: Toggle Light/Dark mode from the top menu
+* **Language**: Supports Korean and English
+* **Device Recommendation**: Automatically suggests optimal settings
+* **Error Prevention**: Works with Korean file paths
+
+---
+
+## 📝 License
+
+This program uses the open-source algorithm Real-ESRGAN.
+
+* More info: https://github.com/xinntao/Real-ESRGAN
