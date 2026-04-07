@@ -49,6 +49,33 @@ UI_TEXTS = {
         'error_no_output': '❌ 출력 폴더를 선택하세요.',
         'error_target_parts': '❌ Target Parts는 쉼표로 구분된 정수여야 합니다.',
         'error_no_target_parts': '❌ 최소 하나의 Target Part를 지정하세요.',
+        'tab_image': '이미지 업스케일',
+        'tab_video': '비디오 업스케일',
+        'tab_video_merge': '영상 편집 (합치기)',  # 추가
+        
+        # 편집기 탭 관련 추가
+        'video_timeline': '타임라인 (병합 순서)',
+        'timeline_preview_msg': '목록에 영상을 추가하면 여기에 시퀀스가 구성됩니다.',
+        'video_sources': '소스 미디어 리스트',
+        'add': '가져오기',
+        'remove': '삭제',
+        'clear': '비우기',
+        'merge_quality': '내보내기 화질 (왼쪽이 고화질)',
+        'export_video': '최종 영상 내보내기',
+        'error_min_videos': '최소 2개 이상의 영상을 추가해주세요.',
+        'success_merge': '영상이 성공적으로 합쳐졌습니다!',
+        
+        # 기타 필요한 키
+        'window_title': 'Upscaler - 영상/이미지 업스케일러',
+        'menu_theme': '테마',
+        'menu_light': '라이트 모드',
+        'menu_dark': '다크 모드',
+        'menu_language': '언어',
+        'lang_ko': '한국어',
+        'lang_en': '영어',
+        'browse': '찾아보기',
+        'upscale_image': '이미지 업스케일 시작',
+        'run_video_upscale': '비디오 업스케일 시작',
     },
     'en': {
         'tab_video_merge': 'Video Merge',
@@ -97,6 +124,31 @@ UI_TEXTS = {
         'error_no_output': '❌ Please select an output folder.',
         'error_target_parts': '❌ Target Parts must be comma-separated integers.',
         'error_no_target_parts': '❌ Please enter at least one target part.',
+        'tab_image': 'Image Upscale',
+        'tab_video': 'Video Upscale',
+        'tab_video_merge': 'Video Editor',
+        
+        'video_timeline': 'Timeline (Merge Order)',
+        'timeline_preview_msg': 'Add videos to build your sequence here.',
+        'video_sources': 'Source Media List',
+        'add': 'Add',
+        'remove': 'Remove',
+        'clear': 'Clear',
+        'merge_quality': 'Export Quality (Left is Higher)',
+        'export_video': 'Export Video',
+        'error_min_videos': 'Please add at least 2 videos.',
+        'success_merge': 'Videos merged successfully!',
+        
+        'window_title': 'Upscaler',
+        'menu_theme': 'Theme',
+        'menu_light': 'Light Mode',
+        'menu_dark': 'Dark Mode',
+        'menu_language': 'Language',
+        'lang_ko': 'Korean',
+        'lang_en': 'English',
+        'browse': 'Browse',
+        'upscale_image': 'Start Image Upscale',
+        'run_video_upscale': 'Start Video Upscale',
     }
 }
 
