@@ -1,14 +1,16 @@
-import os
 import sys
-
 try:
     import torchvision.transforms.functional as F
     sys.modules['torchvision.transforms.functional_tensor'] = F
 except ImportError:
     pass
 
+import os
 import cv2
 import torch
+import numpy as np
+from openvino.runtime import Core
+
 from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QComboBox, QProgressBar, QTextEdit, QVBoxLayout
@@ -29,8 +31,16 @@ class ImageUpscaleWorker(QThread):
 
     def run(self):
         self.progress.emit(10)
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.progress.emit(20)
+        
+        ie = Core()
+        devices = ie.available_devices
+        
+        if torch.cuda.is_available():
+            device_name = "CUDA"
+        elif any("GPU" in d for d in devices):
+            device_name = "GPU"
+        else:
+            device_name = "CPU"
 
         model_urls = {
             2: 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth',
@@ -39,19 +49,11 @@ class ImageUpscaleWorker(QThread):
         }
         model_url = model_urls.get(self.scale, model_urls[2])
 
-        from basicsr.archs.rrdbnet_arch import RRDBNet
         from realesrgan import RealESRGANer
+        from basicsr.archs.rrdbnet_arch import RRDBNet
 
-        model = RRDBNet(
-            num_in_ch=3,
-            num_out_ch=3,
-            num_feat=64,
-            num_block=23,
-            num_grow_ch=32,
-            scale=self.scale
-        )
-        self.progress.emit(30)
-
+        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=self.scale)
+        
         upsampler = RealESRGANer(
             scale=self.scale,
             model_path=model_url,
@@ -59,29 +61,26 @@ class ImageUpscaleWorker(QThread):
             tile=0,
             tile_pad=10,
             pre_pad=0,
-            half=(device.type == 'cuda'),
-            device=device
+            half=False,
+            device='cuda' if device_name == "CUDA" else 'cpu'
         )
-        self.progress.emit(40)
 
         img = cv2.imread(self.input_path, cv2.IMREAD_UNCHANGED)
         if img is None:
-            self.finished.emit(f"❌ 이미지를 찾을 수 없습니다: {self.input_path}")
+            self.finished.emit(f"❌ Error: {self.input_path}")
             return
 
-        self.progress.emit(60)
         try:
             output, _ = upsampler.enhance(img, outscale=self.scale)
             self.progress.emit(80)
-
             os.makedirs(self.output_folder, exist_ok=True)
             input_basename = os.path.splitext(os.path.basename(self.input_path))[0]
-            output_file = os.path.join(self.output_folder, f"{input_basename}_upscaled_x{self.scale}.png")
+            output_file = os.path.join(self.output_folder, f"{input_basename}_x{self.scale}.png")
             cv2.imwrite(output_file, output)
             self.progress.emit(100)
-            self.finished.emit(f"✨ 완료! 결과가 저장되었습니다: {os.path.abspath(output_file)}")
+            self.finished.emit(f"✨ Success (via {device_name}): {os.path.abspath(output_file)}")
         except Exception as e:
-            self.finished.emit(f"❌ 처리 중 에러 발생: {e}")
+            self.finished.emit(f"❌ Error: {e}")
 
 def create_label_with_info(translator, text_key, tooltip_key):
     container = QWidget()
@@ -92,8 +91,6 @@ def create_label_with_info(translator, text_key, tooltip_key):
     
     info = QPushButton('?')
     info.setToolTip(translator.t(tooltip_key))
-    
-    info.setProperty("class", "help-button") 
     info.setFixedSize(20, 20)
     info.setCursor(Qt.PointingHandCursor)
     

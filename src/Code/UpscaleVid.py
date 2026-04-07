@@ -1,14 +1,15 @@
-import os
 import sys
-
 try:
     import torchvision.transforms.functional as F
     sys.modules['torchvision.transforms.functional_tensor'] = F
 except ImportError:
     pass
 
+import os
 import cv2
 import torch
+from openvino.runtime import Core
+
 from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QSpinBox, QComboBox, QTextEdit, QProgressBar, QVBoxLayout
@@ -18,40 +19,36 @@ from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from setting import get_device_info_text, get_device_recommendation
 
 def run_split_upscale(input_path, num_splits, target_parts, scale=2, tile=800, output_folder='./Vid', progress_callback=None, log_callback=None):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    ie = Core()
+    devices = ie.available_devices
+    
+    if torch.cuda.is_available():
+        device_name = "CUDA"
+    elif any("GPU" in d for d in devices):
+        device_name = "GPU"
+    else:
+        device_name = "CPU"
+
     if log_callback:
-        log_callback(f"🚀 실행 디바이스: {device}")
+        log_callback(f"🚀 Acceleration: {device_name} (via OpenVINO)")
 
-    from basicsr.archs.rrdbnet_arch import RRDBNet
     from realesrgan import RealESRGANer
+    from basicsr.archs.rrdbnet_arch import RRDBNet
 
-    model = RRDBNet(
-        num_in_ch=3,
-        num_out_ch=3,
-        num_feat=64,
-        num_block=23,
-        num_grow_ch=32,
-        scale=scale
-    )
-    model_url_map = {
-        2: 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth',
-        4: 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth',
-        8: 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.1/RealESRGAN_x8.pth'
-    }
-    model_url = model_url_map.get(scale, model_url_map[2])
-
+    model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=scale)
+    
     upsampler = RealESRGANer(
         scale=scale,
-        model_path=model_url,
+        model_path=None,
         model=model,
         tile=tile,
-        half=(device.type == 'cuda'),
-        device=device
+        half=False,
+        device='cuda' if device_name == "CUDA" else 'cpu'
     )
 
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
-        raise RuntimeError(f"비디오 파일을 열 수 없습니다: {input_path}")
+        raise RuntimeError(f"Error: {input_path}")
 
     fps = cap.get(cv2.CAP_PROP_FPS)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -65,13 +62,8 @@ def run_split_upscale(input_path, num_splits, target_parts, scale=2, tile=800, o
         end = (i + 1) * frames_per_part if i != num_splits - 1 else total_frames
         parts_ranges.append((start, end))
 
-    if log_callback:
-        log_callback(f"📊 총 {total_frames} 프레임을 {num_splits}개 파트로 나눴습니다.")
-
     selected_parts = [idx for idx in target_parts if 0 <= idx < num_splits]
     if not selected_parts:
-        if log_callback:
-            log_callback("⚠️ 처리할 파트를 찾을 수 없습니다.")
         cap.release()
         return
 
@@ -81,30 +73,22 @@ def run_split_upscale(input_path, num_splits, target_parts, scale=2, tile=800, o
 
     for part_idx in selected_parts:
         start_f, end_f = parts_ranges[part_idx]
-        output_path = os.path.join(output_folder, f"part_{part_idx}_upscaled_x{scale}.mov")
-
+        output_path = os.path.join(output_folder, f"part_{part_idx}_x{scale}.mov")
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_f)
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(output_path, fourcc, fps, (width * scale, height * scale))
 
-        if log_callback:
-            log_callback(f"🎬 Part {part_idx} 작업 중... ({start_f} ~ {end_f} frame)")
-
         try:
             for frame_idx in range(start_f, end_f):
                 ret, frame = cap.read()
-                if not ret:
-                    break
+                if not ret: break
                 output, _ = upsampler.enhance(frame, outscale=scale)
                 out.write(output)
-
                 processed_frames += 1
-                if progress_callback and total_selected_frames > 0:
+                if progress_callback:
                     progress_callback(int(processed_frames * 100 / total_selected_frames))
         finally:
             out.release()
-            if log_callback:
-                log_callback(f"✅ Part {part_idx} 완료!")
 
     cap.release()
     if progress_callback:
@@ -127,24 +111,13 @@ class VideoUpscaleWorker(QThread):
     def run(self):
         try:
             run_split_upscale(
-                self.input_path,
-                self.num_splits,
-                self.target_parts,
-                scale=self.scale,
-                tile=self.tile,
-                output_folder=self.output_folder,
-                progress_callback=self.emit_progress,
-                log_callback=self.emit_log
+                self.input_path, self.num_splits, self.target_parts,
+                scale=self.scale, tile=self.tile, output_folder=self.output_folder,
+                progress_callback=self.progress.emit, log_callback=self.log.emit
             )
-            self.finished.emit("✨ 모든 파트 업스케일링이 완료되었습니다.")
+            self.finished.emit("✨ Video upscaling completed.")
         except Exception as e:
-            self.finished.emit(f"❌ 에러 발생: {e}")
-
-    def emit_progress(self, value):
-        self.progress.emit(value)
-
-    def emit_log(self, message):
-        self.log.emit(message)
+            self.finished.emit(f"❌ Error: {e}")
 
 def create_label_with_info(translator, text_key, tooltip_key):
     container = QWidget()
@@ -155,7 +128,6 @@ def create_label_with_info(translator, text_key, tooltip_key):
     
     info = QPushButton('?')
     info.setToolTip(translator.t(tooltip_key))
-    info.setProperty("class", "help-button")
     info.setFixedSize(20, 20)
     info.setCursor(Qt.PointingHandCursor)
     
@@ -208,7 +180,6 @@ def create_video_tab(parent, translations):
     target_layout = QHBoxLayout()
     target_layout.addWidget(create_label_with_info(parent, 'target_parts', 'target_parts_tip'))
     parent.target_parts_edit = QLineEdit('0')
-    parent.target_parts_edit.setPlaceholderText('0,1,2')
     target_layout.addWidget(parent.target_parts_edit)
     layout.addLayout(target_layout)
 

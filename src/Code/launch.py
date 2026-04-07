@@ -2,6 +2,9 @@ import os
 import sys
 import re
 
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ["OMP_NUM_THREADS"] = "4" 
+
 dll_path = os.path.join(sys.prefix, 'Lib', 'site-packages', 'torch', 'lib')
 if os.path.exists(dll_path):
     os.add_dll_directory(dll_path)
@@ -9,7 +12,7 @@ if os.path.exists(dll_path):
 from PyQt5.QtWidgets import (QApplication, QWidget, QTabWidget, QVBoxLayout, 
                              QMenuBar, QFileDialog, QHBoxLayout, QLabel, 
                              QPushButton, QListWidget, QListWidgetItem, QAbstractItemView, 
-                             QMessageBox, QSlider, QFrame, QListView)
+                             QMessageBox, QSlider, QListView)
 from PyQt5.QtCore import Qt, QSize
 
 from setting import UI_TEXTS, get_device_info_text, get_device_recommendation, apply_app_theme
@@ -31,7 +34,22 @@ def merge_videos(video_paths, output_path, quality=23):
             clips.append(clip)
         
         final_clip = concatenate_videoclips(clips, method="compose")
-        final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", ffmpeg_params=["-crf", str(quality)])
+        
+        try:
+            final_clip.write_videofile(
+                output_path, 
+                codec="h264_qsv", 
+                audio_codec="aac",
+                ffmpeg_params=["-global_quality", str(quality), "-look_ahead", "1"]
+            )
+        except Exception as e:
+            print(f"QSV error: {e}")
+            final_clip.write_videofile(
+                output_path, 
+                codec="libx264", 
+                audio_codec="aac", 
+                ffmpeg_params=["-crf", str(quality)]
+            )
         
         for clip in clips:
             clip.close()
@@ -82,7 +100,6 @@ class VideoMergeTab(QWidget):
         
         list_container = QVBoxLayout()
         self.source_list = QListWidget()
-        self.source_list.setDragEnabled(False)
         self.source_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.source_list.setStyleSheet("QListWidget { background-color: #2d2d2d; color: #ccc; }")
         
@@ -120,7 +137,6 @@ class VideoMergeTab(QWidget):
 
         self.btn_run = QPushButton()
         self.btn_run.setFixedHeight(50)
-        self.btn_run.setProperty("class", "run-button")
         bottom_layout.addWidget(self.btn_run, 6)
         
         layout.addLayout(bottom_layout)
@@ -139,14 +155,12 @@ class VideoMergeTab(QWidget):
 
     def add_to_timeline(self):
         selected_items = self.source_list.selectedItems()
-        if not selected_items:
-            return
+        if not selected_items: return
             
         for item in selected_items:
             file_path = item.text()
             file_name = os.path.basename(file_path)
             new_item = QListWidgetItem(file_name)
-            new_item.setToolTip(file_path)
             new_item.setData(Qt.UserRole, file_path)
             new_item.setTextAlignment(Qt.AlignCenter)
             new_item.setSizeHint(QSize(120, 80))
@@ -229,7 +243,8 @@ class UpscaleApp(QWidget):
         self.tabs.setTabText(2, self.t('tab_video_merge'))
         
         for widget, method, key in self.translations:
-            getattr(widget, method)(self.t(key))
+            if hasattr(widget, method):
+                getattr(widget, method)(self.t(key))
             
         self.img_device_label.setText(get_device_info_text(self.language))
         self.vid_device_label.setText(get_device_info_text(self.language))
@@ -254,51 +269,97 @@ class UpscaleApp(QWidget):
             btn.setText(self.t('browse'))
 
     def browse_image_input(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, 'Select Input Image', '', 'Images (*.png *.jpg *.jpeg *.bmp)')
-        if file_path: self.img_input_edit.setText(file_path)
+        from PyQt5.QtWidgets import QFileDialog
+        fname, _ = QFileDialog.getOpenFileName(self, self.t('input_image'), "", "Images (*.png *.jpg *.jpeg *.bmp *.webp)")
+        if fname:
+            self.img_input_edit.setText(fname)
 
     def browse_video_input(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, 'Select Input Video', '', 'Videos (*.mp4 *.mov *.avi *.mkv)')
-        if file_path: self.vid_input_edit.setText(file_path)
+        from PyQt5.QtWidgets import QFileDialog
+        fname, _ = QFileDialog.getOpenFileName(self, self.t('input_video'), "", "Videos (*.mp4 *.avi *.mov *.mkv)")
+        if fname:
+            self.vid_input_edit.setText(fname)
 
     def browse_output_folder(self):
-        folder_path = QFileDialog.getExistingDirectory(self, 'Select Output Folder')
-        if folder_path:
-            self.img_output_edit.setText(folder_path)
-            self.vid_output_edit.setText(folder_path)
+        from PyQt5.QtWidgets import QFileDialog
+        folder = QFileDialog.getExistingDirectory(self, self.t('output_folder'))
+        if folder:
+            sender = self.sender()
+            if sender == self.img_output_browse_btn:
+                self.img_output_edit.setText(folder)
+            else:
+                self.vid_output_edit.setText(folder)
+                
+    def browse_image_input(self):
+        from PyQt5.QtWidgets import QFileDialog
+        fname, _ = QFileDialog.getOpenFileName(self, self.t('input_image'), "", "Images (*.png *.jpg *.jpeg *.bmp *.webp)")
+        if fname: self.img_input_edit.setText(fname)
+
+    def browse_video_input(self):
+        from PyQt5.QtWidgets import QFileDialog
+        fname, _ = QFileDialog.getOpenFileName(self, self.t('input_video'), "", "Videos (*.mp4 *.avi *.mov *.mkv)")
+        if fname: self.vid_input_edit.setText(fname)
+
+    def browse_output_folder(self):
+        from PyQt5.QtWidgets import QFileDialog
+        folder = QFileDialog.getExistingDirectory(self, self.t('output_folder'))
+        if folder:
+            if self.sender() == self.img_output_browse_btn:
+                self.img_output_edit.setText(folder)
+            else:
+                self.vid_output_edit.setText(folder)
 
     def run_image_upscale(self):
-        input_path = self.img_input_edit.text().strip()
-        output_folder = self.img_output_edit.text().strip()
+        input_path = self.img_input_edit.text()
+        output_folder = self.img_output_edit.text()
         scale = int(self.img_scale_combo.currentText().replace('x', ''))
-        if not os.path.exists(input_path): return
-        if not output_folder: output_folder = os.path.dirname(input_path) or '.'
-        self.image_worker = ImageUpscaleWorker(input_path, output_folder, scale)
-        self.image_worker.progress.connect(self.img_progress.setValue)
-        self.image_worker.finished.connect(self.on_image_finished)
-        self.image_worker.start()
+        if not input_path or not os.path.exists(input_path):
+            self.img_log.append(self.t('error_input_missing').format(input_path))
+            return
+        if not output_folder:
+            self.img_log.append(self.t('error_no_output'))
+            return
+        self.img_log.append(self.t('start_image'))
+        self.img_run_btn.setEnabled(False)
+        self.img_progress.setValue(0)
+        from UpscaleImg import ImageUpscaleWorker
+        self.img_worker = ImageUpscaleWorker(input_path, output_folder, scale)
+        self.img_worker.progress.connect(self.img_progress.setValue)
+        self.img_worker.finished.connect(self.on_image_finished)
+        self.img_worker.start()
+
+    def on_image_finished(self, message):
+        self.img_log.append(message)
+        self.img_run_btn.setEnabled(True)
 
     def run_video_upscale(self):
-        input_path = self.vid_input_edit.text().strip()
-        output_folder = self.vid_output_edit.text().strip()
+        input_path = self.vid_input_edit.text()
+        output_folder = self.vid_output_edit.text()
+        scale = int(self.vid_scale_combo.currentText().replace('x', ''))
         num_splits = self.split_spin.value()
         tile = self.tile_spin.value()
-        scale = int(self.vid_scale_combo.currentText().replace('x', ''))
-        if not os.path.exists(input_path) or not output_folder: return
-        target_text = self.target_parts_edit.text().strip()
         try:
-            target_parts = [int(x) for x in re.split(r'\s*,\s*', target_text) if x != '']
-        except: return
-        self.video_worker = VideoUpscaleWorker(input_path, output_folder, num_splits, target_parts, tile, scale)
-        self.video_worker.progress.connect(self.vid_progress.setValue)
-        self.video_worker.log.connect(self.append_video_log)
-        self.video_worker.finished.connect(self.on_video_finished)
-        self.video_worker.start()
+            parts_text = self.target_parts_edit.text()
+            target_parts = [int(x.strip()) for x in parts_text.split(',') if x.strip()]
+        except ValueError:
+            self.vid_log.append(self.t('error_target_parts'))
+            return
+        if not input_path or not os.path.exists(input_path):
+            self.vid_log.append(self.t('error_input_missing').format(input_path))
+            return
+        self.vid_log.append(self.t('start_video'))
+        self.vid_run_btn.setEnabled(False)
+        self.vid_progress.setValue(0)
+        from UpscaleVid import VideoUpscaleWorker
+        self.vid_worker = VideoUpscaleWorker(input_path, output_folder, num_splits, target_parts, tile, scale)
+        self.vid_worker.progress.connect(self.vid_progress.setValue)
+        self.vid_worker.log.connect(self.vid_log.append)
+        self.vid_worker.finished.connect(self.on_video_finished)
+        self.vid_worker.start()
 
-    def append_image_log(self, message): self.img_log.append(message)
-    def append_video_log(self, message): self.vid_log.append(message)
-    def on_image_finished(self, message): self.img_progress.setValue(100)
-    def on_video_finished(self, message): self.vid_progress.setValue(100)
+    def on_video_finished(self, message):
+        self.vid_log.append(message)
+        self.vid_run_btn.setEnabled(True)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
