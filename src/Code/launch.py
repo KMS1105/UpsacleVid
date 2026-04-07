@@ -2,7 +2,6 @@ import os
 import sys
 import re
 
-# DLL 경로 설정 (PyTorch 관련)
 dll_path = os.path.join(sys.prefix, 'Lib', 'site-packages', 'torch', 'lib')
 if os.path.exists(dll_path):
     os.add_dll_directory(dll_path)
@@ -17,7 +16,6 @@ from setting import UI_TEXTS, get_device_info_text, get_device_recommendation, a
 from UpscaleImg import create_image_tab, ImageUpscaleWorker
 from UpscaleVid import create_video_tab, VideoUpscaleWorker
 
-# 영상 합치기 로직
 from moviepy.editor import VideoFileClip, concatenate_videoclips
 
 def merge_videos(video_paths, output_path, quality=23):
@@ -41,7 +39,6 @@ def merge_videos(video_paths, output_path, quality=23):
     except Exception as e:
         raise e
 
-# 편집기 스타일의 영상 합치기 탭 클래스
 class VideoMergeTab(QWidget):
     def __init__(self, main_app):
         super().__init__()
@@ -52,14 +49,13 @@ class VideoMergeTab(QWidget):
         layout = QVBoxLayout()
         layout.setSpacing(15)
 
-        # 1. 상단 타임라인 (드래그로 순서 변경 가능)
         self.timeline_title = QLabel()
         layout.addWidget(self.timeline_title)
         
         self.timeline_list = QListWidget()
         self.timeline_list.setFlow(QListWidget.LeftToRight) 
         self.timeline_list.setViewMode(QListWidget.IconMode) 
-        self.timeline_list.setDragDropMode(QAbstractItemView.InternalMove) # 타임라인 내에서만 이동 가능
+        self.timeline_list.setDragDropMode(QAbstractItemView.InternalMove)
         self.timeline_list.setMovement(QListView.Snap)
         self.timeline_list.setResizeMode(QListWidget.Adjust)
         self.timeline_list.setIconSize(QSize(100, 60))
@@ -82,12 +78,11 @@ class VideoMergeTab(QWidget):
         """)
         layout.addWidget(self.timeline_list)
 
-        # 2. 하단 소스 리스트 (고정 보관소)
         mid_layout = QHBoxLayout()
         
         list_container = QVBoxLayout()
         self.source_list = QListWidget()
-        self.source_list.setDragEnabled(False) # 소스 리스트는 순서 고정
+        self.source_list.setDragEnabled(False)
         self.source_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.source_list.setStyleSheet("QListWidget { background-color: #2d2d2d; color: #ccc; }")
         
@@ -96,7 +91,6 @@ class VideoMergeTab(QWidget):
         list_container.addWidget(self.source_list)
         mid_layout.addLayout(list_container, 7)
 
-        # 사이드 컨트롤 버튼
         side_btn_layout = QVBoxLayout()
         side_btn_layout.setAlignment(Qt.AlignTop)
         
@@ -114,7 +108,6 @@ class VideoMergeTab(QWidget):
         mid_layout.addLayout(side_btn_layout, 1)
         layout.addLayout(mid_layout)
 
-        # 3. 인코딩 설정 및 실행
         bottom_layout = QHBoxLayout()
         settings_group = QVBoxLayout()
         self.quality_label = QLabel()
@@ -133,7 +126,6 @@ class VideoMergeTab(QWidget):
         layout.addLayout(bottom_layout)
         self.setLayout(layout)
 
-        # 이벤트 연결
         self.btn_add.clicked.connect(self.import_videos)
         self.btn_to_timeline.clicked.connect(self.add_to_timeline)
         self.btn_remove.clicked.connect(self.remove_from_timeline)
@@ -155,7 +147,7 @@ class VideoMergeTab(QWidget):
             file_name = os.path.basename(file_path)
             new_item = QListWidgetItem(file_name)
             new_item.setToolTip(file_path)
-            new_item.setData(Qt.UserRole, file_path) # 실제 경로 저장
+            new_item.setData(Qt.UserRole, file_path)
             new_item.setTextAlignment(Qt.AlignCenter)
             new_item.setSizeHint(QSize(120, 80))
             self.timeline_list.addItem(new_item)
@@ -244,7 +236,6 @@ class UpscaleApp(QWidget):
         self.img_recommend_label.setText(get_device_recommendation(self.language))
         self.vid_recommend_label.setText(get_device_recommendation(self.language))
         
-        # 버튼/라벨 텍스트 갱신 (합치기 탭 포함)
         self.img_run_btn.setText(self.t('upscale_image'))
         self.vid_run_btn.setText(self.t('run_video_upscale'))
         
@@ -252,7 +243,7 @@ class UpscaleApp(QWidget):
         m_tab.timeline_title.setText("🎬 " + self.t('video_timeline'))
         m_tab.source_label.setText("📂 " + self.t('video_sources'))
         m_tab.btn_add.setText("➕ " + self.t('add'))
-        m_tab.btn_to_timeline.setText("⬇ " + self.t('add_to_timeline')) # setting.py에 추가 필요
+        m_tab.btn_to_timeline.setText("⬇ " + self.t('add_to_timeline')) 
         m_tab.btn_remove.setText("❌ " + self.t('remove'))
         m_tab.btn_clear.setText("🧹 " + self.t('clear'))
         m_tab.quality_label.setText(self.t('merge_quality'))
@@ -262,7 +253,6 @@ class UpscaleApp(QWidget):
                     self.vid_browse_btn, self.output_browse_btn]:
             btn.setText(self.t('browse'))
 
-    # ... (기타 browse 및 run 함수들 생략 - 제공해주신 코드와 동일) ...
     def browse_image_input(self):
         file_path, _ = QFileDialog.getOpenFileName(self, 'Select Input Image', '', 'Images (*.png *.jpg *.jpeg *.bmp)')
         if file_path: self.img_input_edit.setText(file_path)
