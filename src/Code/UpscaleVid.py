@@ -161,20 +161,38 @@ def run_split_upscale(input_path, num_splits, target_parts, scale=2, tile=800, o
     cap.release()
     
     if part_files:
-        if log_callback: log_callback("🔗 영상 및 오디오 병합 중 (GPU 가속 활용)...")
+        if log_callback: log_callback("🔗 영상 및 오디오 병합 중...")
         list_path = os.path.join(final_output_dir, "parts.txt")
-        with open(list_path, 'w') as f:
+        
+        with open(list_path, 'w', encoding='utf-8') as f:
             for p in part_files:
-                f.write(f"file '{os.path.abspath(p)}'\n")
+                safe_path = os.path.abspath(p).replace("\\", "/")
+                f.write(f"file '{safe_path}'\n")
         
         merged_path = os.path.join(final_output_dir, f"{video_filename}_full_x{scale}.mp4")
         merge_cmd = [
             'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', list_path,
-            '-i', input_path, '-map', '0:v', '-map', '1:a?', '-c:v', 'copy', '-c:a', 'aac', merged_path
+            '-i', input_path, '-map', '0:v', '-map', '1:a?', 
+            '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', merged_path
         ]
-        subprocess.run(merge_cmd, stderr=subprocess.DEVNULL)
-        os.remove(list_path)
-
+        
+        try:
+            result = subprocess.run(merge_cmd, capture_output=True, text=True, encoding='utf-8')
+            
+            if result.returncode != 0:
+                if log_callback: log_callback(f"❌ FFmpeg 병합 실패: {result.stderr[-200:]}")
+            
+            if os.path.exists(merged_path) and os.path.getsize(merged_path) > 0:
+                if log_callback: log_callback(f"✅ 최종 저장 완료: {os.path.basename(merged_path)}")
+            else:
+                if log_callback: log_callback("❌ 파일이 생성되지 않았습니다. 원본 파일의 오디오 트랙을 확인하세요.")
+                
+        except Exception as e:
+            if log_callback: log_callback(f"❌ 병합 중 오류: {str(e)}")
+        
+        if os.path.exists(list_path): 
+            os.remove(list_path)
+            
     if progress_callback: progress_callback(100)
     return final_output_dir
 
