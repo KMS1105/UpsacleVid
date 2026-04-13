@@ -1,7 +1,5 @@
 # 🚀 AI Upscaler Project
 
-## 🇰🇷 한국어
-
 이 프로젝트는 **Real-ESRGAN** 기반으로 이미지 및 비디오의 해상도를 향상시키는 데스크톱 애플리케이션입니다.  
 PyQt5 기반 GUI와 **NVIDIA CUDA / Intel OpenVINO / CPU 자동 전환 시스템**을 통해 다양한 환경에서 최적의 성능을 제공합니다.
 
@@ -64,8 +62,6 @@ python Launch.py
 - CPU: 느림 (분할 증가)
 
 ---
-
-## 🇺🇸 English
 
 This project is a desktop application based on **Real-ESRGAN** for enhancing image and video resolution.  
 It uses a PyQt5 GUI and supports **NVIDIA CUDA, Intel OpenVINO, and CPU auto-switching** for optimal performance across systems.
