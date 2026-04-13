@@ -1,7 +1,45 @@
 import platform
-import torch
 import subprocess
 import psutil
+import sys
+
+def get_hardware_gpu_name():
+    try:
+        output = subprocess.check_output("wmic path win32_VideoController get name", shell=True).decode('utf-8')
+        lines = [l.strip() for l in output.split('\n') if l.strip() and "Name" not in l]
+        for line in lines:
+            if "NVIDIA" in line or "GeForce" in line: return line
+    except: pass
+    return None
+
+def get_torch_install_command():
+    gpu_name = get_hardware_gpu_name()
+    if not gpu_name: return None
+    
+    if any(x in gpu_name for x in ["RTX 40", "RTX 50", "L4", "H100"]):
+        url = "https://download.pytorch.org/whl/cu121"
+    else:
+        url = "https://download.pytorch.org/whl/cu118"
+    
+    return f"install torch torchvision torchaudio --index-url {url}"
+
+def get_detailed_system_info():
+    try:
+        cpu = platform.processor() or "Unknown CPU"
+        mem = psutil.virtual_memory().total / (1024**3)
+        gpu = "None"
+        try:
+            import torch
+            if torch.cuda.is_available():
+                gpu = torch.cuda.get_device_name(0)
+            else:
+                h_gpu = get_hardware_gpu_name()
+                gpu = f"{h_gpu} (CUDA 미지원)" if h_gpu else (get_intel_gpu_name() or "CPU")
+        except:
+            h_gpu = get_hardware_gpu_name()
+            gpu = f"{h_gpu} (라이브러리 오류)" if h_gpu else "Torch 미설치"
+        return f"CPU: {cpu} | RAM: {mem:.1f}GB | GPU: {gpu}"
+    except: return "Error"
 
 def get_intel_gpu_name():
     try:
@@ -18,21 +56,33 @@ def get_intel_gpu_name():
         pass
     return None
 
-def get_detailed_system_info():
-    try:
-        cpu = platform.processor() or "Unknown CPU"
-        cpu_count = psutil.cpu_count(logical=True)
-        mem = psutil.virtual_memory().total / (1024**3)
-        gpu = "None"
-        if torch.cuda.is_available():
-            gpu = torch.cuda.get_device_name(0)
-        else:
-            intel = get_intel_gpu_name()
-            if intel:
-                gpu = intel
-        return f"CPU: {cpu} ({cpu_count}T) | RAM: {mem:.1f}GB | GPU: {gpu}"
-    except:
-        return "System info retrieval failed"
+def get_device_info_text(lang='ko'):
+    import torch
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        return f"{UI_TEXTS[lang]['device_label']}GPU ({gpu_name})"
+    intel_gpu = get_intel_gpu_name()
+    if intel_gpu:
+        return f"{UI_TEXTS[lang]['device_label']}Intel GPU ({intel_gpu})"
+    cpu_name = platform.processor() or 'Unknown CPU'
+    return f"{UI_TEXTS[lang]['device_label']}CPU ({cpu_name})"
+
+def get_device_recommendation(lang='ko'):
+    texts = UI_TEXTS[lang]
+    import torch
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        lower_name = gpu_name.lower()
+        if any(kw in lower_name for kw in ['rtx', 'a100', 'v100', 'titan', 'h100']):
+            return texts['gpu_recommend_high'].format(gpu_name)
+        if any(kw in lower_name for kw in ['gtx', '1660', '1080', '1070']):
+            return texts['gpu_recommend_mid'].format(gpu_name)
+        return texts['gpu_recommend_low'].format(gpu_name)
+    intel_gpu = get_intel_gpu_name()
+    if intel_gpu:
+        return texts['igpu_recommend'].format(intel_gpu)
+    cpu_name = platform.processor() or 'Unknown CPU'
+    return texts['cpu_recommend'].format(cpu_name)
 
 def format_time(seconds):
     if seconds is None or seconds < 0:
@@ -159,32 +209,6 @@ UI_TEXTS = {
         'export_video': 'Start Optimized Export (Intel QSV Accel)',
     }
 }
-
-def get_device_info_text(lang='ko'):
-    if torch.cuda.is_available():
-        gpu_name = torch.cuda.get_device_name(0)
-        return f"{UI_TEXTS[lang]['device_label']}GPU ({gpu_name})"
-    intel_gpu = get_intel_gpu_name()
-    if intel_gpu:
-        return f"{UI_TEXTS[lang]['device_label']}Intel GPU ({intel_gpu})"
-    cpu_name = platform.processor() or 'Unknown CPU'
-    return f"{UI_TEXTS[lang]['device_label']}CPU ({cpu_name})"
-
-def get_device_recommendation(lang='ko'):
-    texts = UI_TEXTS[lang]
-    if torch.cuda.is_available():
-        gpu_name = torch.cuda.get_device_name(0)
-        lower_name = gpu_name.lower()
-        if any(kw in lower_name for kw in ['rtx', 'a100', 'v100', 'titan', 'h100']):
-            return texts['gpu_recommend_high'].format(gpu_name)
-        if any(kw in lower_name for kw in ['gtx', '1660', '1080', '1070']):
-            return texts['gpu_recommend_mid'].format(gpu_name)
-        return texts['gpu_recommend_low'].format(gpu_name)
-    intel_gpu = get_intel_gpu_name()
-    if intel_gpu:
-        return texts['igpu_recommend'].format(intel_gpu)
-    cpu_name = platform.processor() or 'Unknown CPU'
-    return texts['cpu_recommend'].format(cpu_name)
 
 def apply_app_theme(widget, theme):
     if theme == 'dark':

@@ -24,10 +24,9 @@ from moviepy.editor import VideoFileClip, concatenate_videoclips
 
 from setting import (
     UI_TEXTS, apply_app_theme, get_device_info_text, 
-    get_device_recommendation, get_detailed_system_info
+    get_device_recommendation, get_detailed_system_info,
+    get_torch_install_command, get_hardware_gpu_name
 )
-from UpscaleImg import create_image_tab, ImageUpscaleWorker
-from UpscaleVid import create_video_tab, VideoUpscaleWorker
 
 import os
 import zipfile
@@ -322,9 +321,38 @@ class UpscaleApp(QMainWindow):
         self.language = 'ko'
         self.theme = 'light'
         self.translations = []
+        self.verify_torch_environment()
         self.initUI()
 
+    def verify_torch_environment(self):
+        need_fix = False
+        try:
+            import torch
+            if not torch.cuda.is_available():
+                if get_hardware_gpu_name(): need_fix = True
+        except:
+            need_fix = True
+
+        if need_fix:
+            cmd = get_torch_install_command()
+            if cmd:
+                ret = QMessageBox.question(self, "CUDA 가속 설정", 
+                    "NVIDIA GPU(RTX 3060 등) 가속을 위해 전용 라이브러리 설치가 필요합니다.\n재설치할까요?",
+                    QMessageBox.Yes | QMessageBox.No)
+                
+                if ret == QMessageBox.Yes:
+                    try:
+                        subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "torch", "torchvision", "torchaudio", "-y"])
+                        subprocess.check_call([sys.executable, "-m", "pip"] + cmd.split())
+                        QMessageBox.information(self, "성공", "설치가 완료되었습니다. 프로그램을 재시작하세요.")
+                        sys.exit()
+                    except Exception as e:
+                        QMessageBox.critical(self, "실패", f"설치 중 오류: {e}")
+
     def initUI(self):
+        from UpscaleImg import create_image_tab, ImageUpscaleWorker
+        from UpscaleVid import create_video_tab, VideoUpscaleWorker
+
         self.resize(1050, 850)
         self.setMinimumSize(950, 750)
         
@@ -361,6 +389,7 @@ class UpscaleApp(QMainWindow):
         self.move(qr.topLeft())
         
         self.show()
+    
 
     def t(self, key):
         return UI_TEXTS[self.language].get(key, key)
@@ -460,6 +489,7 @@ class UpscaleApp(QMainWindow):
         self.sys_info_label.setText(get_detailed_system_info())
 
     def run_image_upscale(self):
+        from UpscaleImg import create_image_tab, ImageUpscaleWorker
         input_path = self.img_input_edit.text()
         output_folder = self.img_output_edit.text()
         scale = int(self.img_scale_combo.currentText().replace('x', ''))
@@ -514,6 +544,7 @@ class UpscaleApp(QMainWindow):
         scale = int(self.vid_scale_combo.currentText().replace('x', ''))
 
         def on_ffmpeg_ready(success):
+            from UpscaleVid import create_video_tab, VideoUpscaleWorker
             if success:
                 self.vid_log.append(f"[{time.strftime('%H:%M:%S')}] {self.t('start_video')}")
                 self.vid_worker = VideoUpscaleWorker(input_path, output_folder, num_splits, target_parts, tile, scale)
