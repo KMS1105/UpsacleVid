@@ -225,6 +225,11 @@ def apply_app_theme(widget, theme):
             QTabBar::tab { background-color: #121212; color: #888888; padding: 12px 25px; border: 1px solid #3e3e42; border-top-left-radius: 8px; border-top-right-radius: 8px; margin-right: 4px; }
             QTabBar::tab:selected { background-color: #1e1e1e; color: #00bcff; border-bottom: 3px solid #00bcff; font-weight: bold; }
             QListWidget { background-color: #2d2d2d; color: #ffffff; border: 1px solid #3e3e42; }
+            QLabel#timeline_title { 
+                font-size: 16px; 
+                font-weight: bold; 
+                color: #00bcff !important; 
+            }
         """
     else:
         style = """
@@ -242,7 +247,17 @@ def apply_app_theme(widget, theme):
             QListWidget, QListView, QScrollArea, QAbstractScrollArea { background-color: #ffffff !important; color: #202124 !important; border: 1px solid #dadce0; }
             QListWidget::item { background-color: #ffffff; color: #202124; }
             QListWidget::item:selected { background-color: #e8f0fe; color: #1a73e8; }
-            QLabel { background-color: transparent !important; color: #202124 !important; }
             QGroupBox { border: 1px solid #dadce0; border-radius: 8px; margin-top: 10px; padding-top: 10px; background-color: #ffffff; }
+            QLabel { background-color: transparent; color: #202124; }
+            QLabel#timeline_title { 
+                font-size: 16px !important; 
+                font-weight: bold !important; 
+                color: #00bcff !important; 
+                background-color: transparent !important;
+            }
+            QLabel#source_title { 
+                font-weight: bold !important; 
+                background-color: transparent !important;
+            }
         """
     widget.setStyleSheet(style)

@@ -72,7 +72,8 @@ class VideoMergeTab(QWidget):
         self.main_layout.setSpacing(15)
 
         self.timeline_title = QLabel()
-        self.timeline_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #00bcff;")
+        self.timeline_title.setObjectName("timeline_title")
+        #self.timeline_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #00bcff;")
         self.main_layout.addWidget(self.timeline_title)
         
         self.timeline_list = QListWidget()
@@ -85,24 +86,6 @@ class VideoMergeTab(QWidget):
         self.timeline_list.setMinimumHeight(200)
         self.timeline_list.setIconSize(QSize(120, 70))
         self.timeline_list.setSpacing(15)
-        self.timeline_list.setStyleSheet("""
-            QListWidget { 
-                background-color: #161616; 
-                border: 2px dashed #333; 
-                border-radius: 12px; 
-                padding: 10px;
-            }
-            QListWidget::item { 
-                background-color: #252525; 
-                color: white; 
-                border-radius: 8px;
-                border: 1px solid #444;
-            }
-            QListWidget::item:selected { 
-                background-color: #3d5afe; 
-                border: 2px solid #ffffff; 
-            }
-        """)
         self.main_layout.addWidget(self.timeline_list)
 
         self.mid_container = QHBoxLayout()
@@ -110,11 +93,11 @@ class VideoMergeTab(QWidget):
         
         self.source_container = QVBoxLayout()
         self.source_label = QLabel()
-        self.source_label.setStyleSheet("font-weight: bold;")
+        self.timeline_title.setObjectName("source_title")
+        #self.source_label.setStyleSheet("font-weight: bold;")
         self.source_list = QListWidget()
         self.source_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.source_list.setDragEnabled(True)
-        self.source_list.setStyleSheet("background-color: #222; border-radius: 8px;")
         
         self.source_container.addWidget(self.source_label)
         self.source_container.addWidget(self.source_list)
@@ -143,7 +126,7 @@ class VideoMergeTab(QWidget):
         self.line_sep = QFrame()
         self.line_sep.setFrameShape(QFrame.HLine)
         self.line_sep.setFrameShadow(QFrame.Sunken)
-        self.line_sep.setStyleSheet("background-color: #333;")
+        #self.line_sep.setStyleSheet("background-color: #333;")
         self.main_layout.addWidget(self.line_sep)
 
         self.btn_run = QPushButton()
