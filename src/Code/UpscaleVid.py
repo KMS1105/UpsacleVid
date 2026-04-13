@@ -10,7 +10,6 @@ from collections import deque
 from threading import Thread
 from queue import Queue
 import time
-from moviepy.editor import VideoFileClip, concatenate_videoclips
 from openvino.runtime import Core, AsyncInferQueue
 from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QPushButton, QLineEdit,
@@ -53,8 +52,9 @@ def run_split_upscale(input_path, num_splits, target_parts, scale=2, tile=800, o
 
     if device_name == "GPU":
         gpu_id = "GPU.1" if "GPU.1" in available_devices else "GPU.0"
+        if log_callback: log_callback(f"🚀 OpenVINO GPU 가속 사용: {gpu_id}")
         if not os.path.exists(xml_path):
-            if log_callback: log_callback("⚙️ OpenVINO IR 모델 변환 중...")
+            if log_callback: log_callback("⚙️ 모델 변환 중 (최초 1회)...")
             model_temp = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=scale)
             loadnet = torch.load(pth_path, map_location='cpu')
             model_temp.load_state_dict(loadnet['params_ema'] if 'params_ema' in loadnet else loadnet, strict=True)
@@ -91,34 +91,45 @@ def run_split_upscale(input_path, num_splits, target_parts, scale=2, tile=800, o
     os.makedirs(final_output_dir, exist_ok=True)
     part_files = []
 
-    if log_callback: log_callback(f"🎬 총 {len(selected_parts)}개 파트 처리 시작")
+    if log_callback: log_callback(f"🎬 총 {len(selected_parts)}개 파트 처리 시작 (형식: upscale{scale}x_n_{num_splits}.mov)")
 
     for part_idx in selected_parts:
         start_f, end_f = parts_ranges[part_idx]
-        output_path = os.path.join(final_output_dir, f"part_{part_idx}_x{scale}.mp4")
+        output_path = os.path.join(final_output_dir, f"upscale{scale}x_{part_idx}_{num_splits}.mov")
         part_files.append(output_path)
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_f)
 
+        start_time = start_f / fps
+        duration = (end_f - start_f) / fps
+        if log_callback: log_callback(f"📦 파트 {part_idx} 시작 ({start_f} ~ {end_f} 프레임)")
+
         ffmpeg_cmd = [
-            'ffmpeg', '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo',
-            '-s', f'{out_w}x{out_h}', '-pix_fmt', 'bgr24', '-r', str(fps),
-            '-i', '-', '-c:v', 'h264_qsv', '-preset', 'veryfast',
-            '-global_quality', '25', '-pix_fmt', 'nv12', output_path
+            'ffmpeg', '-y',
+            '-f', 'rawvideo', '-vcodec', 'rawvideo', '-s', f'{out_w}x{out_h}', '-pix_fmt', 'bgr24', '-r', str(fps), '-i', '-', 
+            '-ss', str(start_time), '-t', str(duration), '-accurate_seek', '-i', input_path,
+            '-map', '0:v', '-map', '1:a?',
+            '-c:v', 'h264_qsv', '-preset', 'veryfast', '-global_quality', '25',
+            '-c:a', 'pcm_s16le', 
+            '-af', 'aresample=async=1', 
+            '-vsync', 'cfr',
+            output_path
         ]
-        process = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        process = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**8)
 
         def writer_thread_func(proc, q):
-            while True:
-                data = q.get()
-                if data is None: break
-                proc.stdin.write(data)
-            proc.stdin.close()
+            try:
+                while True:
+                    data = q.get()
+                    if data is None: break
+                    proc.stdin.write(data)
+                proc.stdin.flush() 
+                proc.stdin.close()
+            except: pass
 
         w_thread = Thread(target=writer_thread_func, args=(process, write_queue), daemon=True)
         w_thread.start()
 
         input_queue = Queue(maxsize=32)
-
         def preprocessor_thread():
             for _ in range(start_f, end_f):
                 ret, frame = cap.read()
@@ -138,61 +149,48 @@ def run_split_upscale(input_path, num_splits, target_parts, scale=2, tile=800, o
         while True:
             data = input_queue.get()
             if data is None: break
-            
             if device_name == "GPU":
                 infer_queue.start_async({0: data})
             else:
                 output, _ = upsampler.enhance(data, outscale=scale)
                 write_queue.put(output.tobytes())
-            
             processed_count += 1
             if progress_callback:
                 progress_callback(int(processed_count * 90 / total_selected_frames))
-            
-            if log_callback and processed_count % 100 == 0:
-                log_callback(f"⏳ 진행 중: {processed_count}/{total_selected_frames} (전처리 큐: {input_queue.qsize()}, 출력 큐: {write_queue.qsize()})")
+            if log_callback and processed_count % 200 == 0:
+                log_callback(f"⏳ 진행 중: {processed_count}/{total_selected_frames} 프레임 완료")
         
         p_thread.join()
         if device_name == "GPU": infer_queue.wait_all()
         write_queue.put(None)
         w_thread.join()
         process.wait()
+        if log_callback: log_callback(f"✅ 파트 {part_idx} 저장 완료: {os.path.basename(output_path)}")
     
     cap.release()
     
-    if part_files:
-        if log_callback: log_callback("🔗 영상 및 오디오 병합 중...")
+    if len(part_files) > 1:
+        if log_callback: log_callback("🔗 최종 병합 및 오디오 인코딩 중...")
         list_path = os.path.join(final_output_dir, "parts.txt")
-        
         with open(list_path, 'w', encoding='utf-8') as f:
             for p in part_files:
-                safe_path = os.path.abspath(p).replace("\\", "/")
-                f.write(f"file '{safe_path}'\n")
+                safe_p = os.path.abspath(p).replace('\\', '/')
+                f.write(f"file '{safe_p}'\n")
+                
+        start_p = selected_parts[0]
+        end_p = selected_parts[-1]
         
-        merged_path = os.path.join(final_output_dir, f"{video_filename}_full_x{scale}.mp4")
+        merged_path = os.path.join(final_output_dir, f"{video_filename}_full_{scale}x_{start_p}~{end_p}.mp4")
         merge_cmd = [
             'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', list_path,
-            '-i', input_path, '-map', '0:v', '-map', '1:a?', 
-            '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', merged_path
+            '-c:v', 'copy', 
+            '-c:a', 'aac', '-b:a', '192k', 
+            merged_path
         ]
-        
-        try:
-            result = subprocess.run(merge_cmd, capture_output=True, text=True, encoding='utf-8')
-            
-            if result.returncode != 0:
-                if log_callback: log_callback(f"❌ FFmpeg 병합 실패: {result.stderr[-200:]}")
-            
-            if os.path.exists(merged_path) and os.path.getsize(merged_path) > 0:
-                if log_callback: log_callback(f"✅ 최종 저장 완료: {os.path.basename(merged_path)}")
-            else:
-                if log_callback: log_callback("❌ 파일이 생성되지 않았습니다. 원본 파일의 오디오 트랙을 확인하세요.")
-                
-        except Exception as e:
-            if log_callback: log_callback(f"❌ 병합 중 오류: {str(e)}")
-        
-        if os.path.exists(list_path): 
-            os.remove(list_path)
-            
+        subprocess.run(merge_cmd, capture_output=True)
+        if os.path.exists(list_path): os.remove(list_path)
+        if log_callback: log_callback(f"✨ 전체 병합 완료: {os.path.basename(merged_path)}")
+
     if progress_callback: progress_callback(100)
     return final_output_dir
 
@@ -237,7 +235,6 @@ def create_label_with_info(parent, text_key, tip_key):
 
 def create_video_tab(parent, translations):
     layout = QVBoxLayout()
-    
     input_layout = QHBoxLayout()
     input_layout.addWidget(create_label_with_info(parent, 'input_video', 'input_video_tip'))
     parent.vid_input_edit = QLineEdit('')
