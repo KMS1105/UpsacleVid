@@ -58,7 +58,7 @@ python Launch.py
 * 모델 자동 다운로드
 * Intel GPU용 OpenVINO 자동 변환
 * CUDA / OpenVINO / CPU 자동 선택
-* 다양한 모델 (2x / 4x / 8x)
+* 다양한 모델 (2x / 4x)
 
 ---
 
@@ -146,7 +146,7 @@ It also includes **automatic model download, OpenVINO conversion, and FFmpeg set
 * Automatic model download
 * OpenVINO conversion for Intel GPU
 * CUDA / OpenVINO / CPU auto selection
-* Supports 2x / 4x / 8x
+* Supports (2x / 4x)
 
 #### 🎬 Video Upscaling
 
