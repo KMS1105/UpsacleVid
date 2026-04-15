@@ -69,7 +69,7 @@ python Launch.py
 * 멀티스레딩 파이프라인 처리
 * OpenVINO 비동기 추론 지원
 * FFmpeg 자동 인코딩
-* GPU / CPU 자동 전환
+* GPU / CPU 모델 자동 전환
 
 ---
 
