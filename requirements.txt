@@ -1,26 +1,27 @@
-# Core acceleration and computation
-torch==2.3.0
-torchvision==0.18.0
-openvino==2024.6.0
-# openvino-dev는 2024.x 버전부터 필수 아님 (통합됨)
+# --- Core Deep Learning & Acceleration ---
+torch>=2.3.0
+torchvision>=0.18.0
+openvino==2025.0.0
 
-# Image/Video processing
-numpy==1.26.4
-opencv-python==4.8.1.78
+# --- Image & Video Processing ---
+numpy>=1.26.4,<2.0.0
+opencv-python>=4.8.1.78
+moviepy>=1.0.3
 
-# GUI and Utilities
-PyQt5==5.15.9
+# --- GUI Framework ---
+PyQt5>=5.15.9
 
-# Upscaling model engines (Python 3.10+ 호환성 주의)
-basicsr==1.4.2
-realesrgan==0.3.0
-gfpgan==1.3.8
-facexlib==0.3.0
+# --- Upscaling & Model Engines ---
+setuptools
+basicsr>=1.4.2
+realesrgan>=0.3.0
+gfpgan>=1.3.8
+facexlib>=0.3.0
 
-# Other essential dependencies
-requests
-tqdm
-pyyaml
-scipy
-pillow
-psutil
+# --- Supporting Utilities ---
+psutil          
+requests        
+tqdm            
+pyyaml          
+scipy           
+pillow          
