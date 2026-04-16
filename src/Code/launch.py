@@ -107,6 +107,7 @@ class UpscaleApp(QMainWindow):
         self.translations = []
         self.verify_torch_environment()
         self.initUI()
+        self.change_theme('light')
     
     def start_model_setup(self):
         from UpscaleImg import ModelSetupWorker
@@ -171,13 +172,13 @@ class UpscaleApp(QMainWindow):
         self.base_layout.addLayout(self.info_panel)
 
         self.update_language()
-        apply_app_theme(self, self.theme)
         self.sys_info_label.setText(get_detailed_system_info())
         
         qr = self.frameGeometry()
         cp = QDesktopWidget().availableGeometry().center()
         qr.moveCenter(cp)
         self.move(qr.topLeft())
+        apply_app_theme(self, self.theme)
         
         self.show()
     
