@@ -9,7 +9,6 @@ import subprocess
 import shutil
 import zipfile
 import urllib.request
-import shutil
 import threading
 from PyQt5.QtWidgets import (
     QMainWindow, QApplication, QTabWidget, QWidget, QVBoxLayout, 
@@ -29,12 +28,6 @@ from setting import (
 )
 
 from VideoMerge import VideoMergeTab
-
-import os
-import zipfile
-import urllib.request
-import shutil
-import threading
 
 def ensure_ffmpeg(log_func=None, progress_func=None, finished_callback=None):
     def download_task():
@@ -107,15 +100,7 @@ class UpscaleApp(QMainWindow):
         self.translations = []
         self.verify_torch_environment()
         self.initUI()
-        self.change_theme('light')
     
-    def start_model_setup(self):
-        from UpscaleImg import ModelSetupWorker
-        self.model_worker = ModelSetupWorker(self.weights_dir)
-        if hasattr(self, 'img_log'):
-            self.model_worker.log.connect(self.img_log.append)
-        self.model_worker.start()
-
     def verify_torch_environment(self):
         need_fix = False
         try:
@@ -129,7 +114,7 @@ class UpscaleApp(QMainWindow):
             cmd = get_torch_install_command()
             if cmd:
                 ret = QMessageBox.question(self, "CUDA 가속 설정", 
-                    "NVIDIA GPU(RTX 3060 등) 가속을 위해 전용 라이브러리 설치가 필요합니다.\n재설치할까요?",
+                    "NVIDIA GPU 가속을 위해 전용 라이브러리 설치가 필요합니다.\n재설치할까요?",
                     QMessageBox.Yes | QMessageBox.No)
                 
                 if ret == QMessageBox.Yes:
@@ -142,8 +127,8 @@ class UpscaleApp(QMainWindow):
                         QMessageBox.critical(self, "실패", f"설치 중 오류: {e}")
 
     def initUI(self):
-        from UpscaleImg import create_image_tab, ImageUpscaleWorker
-        from UpscaleVid import create_video_tab, VideoUpscaleWorker
+        from UpscaleImg import create_image_tab
+        from UpscaleVid import create_video_tab
 
         self.resize(1050, 850)
         self.setMinimumSize(950, 750)
@@ -172,16 +157,16 @@ class UpscaleApp(QMainWindow):
         self.base_layout.addLayout(self.info_panel)
 
         self.update_language()
+        apply_app_theme(self, self.theme)
         self.sys_info_label.setText(get_detailed_system_info())
         
         qr = self.frameGeometry()
         cp = QDesktopWidget().availableGeometry().center()
         qr.moveCenter(cp)
         self.move(qr.topLeft())
-        apply_app_theme(self, self.theme)
+        self.change_theme(self.theme)
         
         self.show()
-    
 
     def t(self, key):
         return UI_TEXTS[self.language].get(key, key)
@@ -259,17 +244,6 @@ class UpscaleApp(QMainWindow):
         self.vid_browse_btn.setText(UI_TEXTS[lang]['browse'])
         self.output_browse_btn.setText(UI_TEXTS[lang]['browse'])
 
-        for tab in [self.image_tab, self.video_tab]:
-            for label in tab.findChildren(QLabel):
-                current_text = label.text().replace(":", "").strip()
-                for key in UI_TEXTS['ko'].keys():
-                    ko_val = UI_TEXTS['ko'][key].replace(":", "").strip()
-                    en_val = UI_TEXTS['en'][key].replace(":", "").strip()
-                    
-                    if current_text == ko_val or current_text == en_val:
-                        label.setText(UI_TEXTS[lang][key])
-                        break
-
         self.img_input_edit.setToolTip(UI_TEXTS[lang]['input_image_tip'])
         self.img_output_edit.setToolTip(UI_TEXTS[lang]['output_folder_tip'])
         self.vid_input_edit.setToolTip(UI_TEXTS[lang]['input_video_tip'])
@@ -281,7 +255,6 @@ class UpscaleApp(QMainWindow):
 
     def run_image_upscale(self):
         from UpscaleImg import ImageUpscaleWorker
-        
         input_path = self.img_input_edit.text()
         output_folder = self.img_output_edit.text()
         model_full_path = self.img_model_combo.currentData()
@@ -289,8 +262,7 @@ class UpscaleApp(QMainWindow):
         if not input_path or not os.path.exists(input_path):
             QMessageBox.warning(self, "Error", "입력 파일을 선택해주세요.")
             return
-            
-        if not model_full_path or not os.path.exists(model_full_path):
+        if not model_full_path:
             QMessageBox.warning(self, "Error", "모델 파일을 선택해주세요.")
             return
             
@@ -315,9 +287,14 @@ class UpscaleApp(QMainWindow):
         input_path = self.vid_input_edit.text()
         output_folder = self.vid_output_edit.text()
         num_splits = self.split_spin.value()
+        model_path = self.vid_model_combo.currentData() # 수정: vid_scale_combo 대신 vid_model_combo 사용
         
         if not os.path.exists(input_path):
-            QMessageBox.warning(self, "Error", "Input file not found.")
+            QMessageBox.warning(self, "Error", "입력 비디오 파일을 찾을 수 없습니다.")
+            self.vid_run_btn.setEnabled(True)
+            return
+        if not model_path:
+            QMessageBox.warning(self, "Error", "모델 파일을 선택해주세요.")
             self.vid_run_btn.setEnabled(True)
             return
 
@@ -337,13 +314,12 @@ class UpscaleApp(QMainWindow):
             return
 
         tile = self.tile_spin.value()
-        scale = int(self.vid_scale_combo.currentText().replace('x', ''))
 
         def on_ffmpeg_ready(success):
-            from UpscaleVid import create_video_tab, VideoUpscaleWorker
+            from UpscaleVid import VideoUpscaleWorker
             if success:
                 self.vid_log.append(f"[{time.strftime('%H:%M:%S')}] {self.t('start_video')}")
-                self.vid_worker = VideoUpscaleWorker(input_path, output_folder, num_splits, target_parts, tile, scale)
+                self.vid_worker = VideoUpscaleWorker(input_path, output_folder, num_splits, target_parts, tile, model_path)
                 self.vid_worker.progress.connect(self.vid_progress.setValue)
                 self.vid_worker.log.connect(self.vid_log.append)
                 self.vid_worker.finished.connect(self.on_video_finished)
