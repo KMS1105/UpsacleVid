@@ -21,6 +21,8 @@ class ModelSetupWorker(QThread):
         self.weights_dir = weights_dir
 
 def run_split_upscale(input_path, num_splits, target_parts, model_path, tile=800, output_folder='./Vid', progress_callback=None, log_callback=None):
+    tile = int(tile)
+    num_splits = int(num_splits)
     core = ov.Core()
     devices = core.available_devices
     is_ov_model = model_path.endswith('.xml') or model_path.endswith('.onnx')
