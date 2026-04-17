@@ -4,21 +4,86 @@ import psutil
 import sys
 import urllib.request
 import os
+import time
+import gc
+import zipfile
+import shutil
 
 MODEL_INFO = {
     2: {'name': 'RealESRGAN_x2plus', 'url': 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth'},
     4: {'name': 'RealESRGAN_x4plus', 'url': 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth'},
 }
 
+def prepare_ffmpeg(base_dir, log_func=None, progress_func=None):
+    ffmpeg_dir = os.path.join(base_dir, "ffmpeg")
+    
+    if shutil.which("ffmpeg"):
+        return True
+
+    for root, dirs, files in os.walk(ffmpeg_dir):
+        if "ffmpeg.exe" in files:
+            bin_path = root
+            if bin_path not in os.environ["PATH"]:
+                os.environ["PATH"] += os.pathsep + bin_path
+            return True
+
+    if log_func: log_func(f"[{time.strftime('%H:%M:%S')}] ⏳ FFmpeg가 없어 다운로드를 시작합니다...")
+    os.makedirs(ffmpeg_dir, exist_ok=True)
+    
+    url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+    zip_path = os.path.join(ffmpeg_dir, "ffmpeg.zip")
+    
+    try:
+        def report_hook(block_num, block_size, total_size):
+            if total_size > 0 and progress_func:  
+                percent = int(block_num * block_size * 95 / total_size)
+                if percent <= 95:
+                    progress_func(percent)
+
+        urllib.request.urlretrieve(url, zip_path, reporthook=report_hook)
+        
+        if log_func: log_func(f"[{time.strftime('%H:%M:%S')}] 📦 압축 해제 중")
+        if progress_func: progress_func(96) 
+        
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(ffmpeg_dir)
+        
+        if progress_func: progress_func(100) 
+        time.sleep(0.5) 
+        
+        new_bin_path = ""
+        for root, dirs, files in os.walk(ffmpeg_dir):
+            if "ffmpeg.exe" in files:
+                new_bin_path = root
+                break
+        
+        if new_bin_path:
+            if new_bin_path not in os.environ["PATH"]:
+                os.environ["PATH"] += os.pathsep + new_bin_path
+            if os.path.exists(zip_path): os.remove(zip_path)
+            return True
+            
+    except Exception as e:
+        if log_func: log_func(f"[{time.strftime('%H:%M:%S')}] ❌ FFmpeg 설치 오류: {str(e)}")
+        if progress_func: progress_func(0)
+        return False
+        
+    return False
+
 def prepare_model(scale, weights_dir, log_func=None):
     if scale not in MODEL_INFO: return None, None
     
     import torch
+    import openvino as ov
+    import torch.onnx
+    from basicsr.archs.rrdbnet_arch import RRDBNet
     
     model_data = MODEL_INFO[scale]
     pth_name = f"{model_data['name']}.pth"
     pth_path = os.path.join(weights_dir, pth_name)
     xml_path = pth_path.replace('.pth', '.xml')
+    bin_path = pth_path.replace('.pth', '.bin')
+    temp_onnx = os.path.join(weights_dir, f"temp_scale_{scale}.onnx")
 
     if not os.path.exists(pth_path):
         if log_func: log_func(f"⏳ {pth_name} 다운로드 중...")
@@ -27,20 +92,70 @@ def prepare_model(scale, weights_dir, log_func=None):
         if log_func: log_func(f"✅ 다운로드 완료")
 
     if not torch.cuda.is_available() and not os.path.exists(xml_path):
-        if log_func: log_func(f"🔄 Intel GPU 가속 모델 변환 중...")
+        if log_func: log_func(f"🔄 Intel GPU 가속 모델 변환 중 (Scale x{scale})...")
         try:
-            import openvino as ov
-            from basicsr.archs.rrdbnet_arch import RRDBNet
             model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=scale)
-            loadnet = torch.load(pth_path, map_location='cpu')
-            model.load_state_dict(loadnet['params_ema'] if 'params_ema' in loadnet else loadnet, strict=True)
+            
+            loadnet = None
+            try:
+                loadnet = torch.load(pth_path, map_location='cpu')
+            except Exception:
+                try:
+                    loadnet = None
+                    gc.collect()
+                    time.sleep(2.0)
+                    if os.path.exists(pth_path): os.remove(pth_path)
+                    urllib.request.urlretrieve(model_data['url'], pth_path)
+                    loadnet = torch.load(pth_path, map_location='cpu')
+                except Exception as e:
+                    if log_func: log_func(f"❌ 파일 교체 실패: {e}")
+                    return pth_path, None
+
+            key = 'params_ema' if 'params_ema' in loadnet else ('params' if 'params' in loadnet else None)
+            state_dict = loadnet[key] if key else loadnet
+            model.load_state_dict(state_dict, strict=True)
             model.eval()
-            ov_model = ov.convert_model(model, example_input=torch.randn(1, 3, 256, 256))
+
+            dummy_input = torch.randn(1, 3, 64, 64)
+            torch.onnx.export(
+                model, dummy_input, temp_onnx, 
+                input_names=['input'], output_names=['output'],
+                dynamic_axes={'input': {2: 'height', 3: 'width'}, 'output': {2: 'height', 3: 'width'}},
+                opset_version=11
+            )
+
+            for _ in range(100):
+                if os.path.exists(temp_onnx): break
+                time.sleep(0.1)
+
+            ov_model = ov.convert_model(temp_onnx)
             ov.save_model(ov_model, xml_path)
+            
+            for _ in range(100):
+                if os.path.exists(xml_path) and os.path.exists(bin_path):
+                    if os.path.getsize(xml_path) > 0: break
+                time.sleep(0.1)
+            
+            time.sleep(1.0)
+            if os.path.exists(temp_onnx):
+                try: os.remove(temp_onnx)
+                except: pass
+                
             if log_func: log_func(f"✅ 변환 완료: {os.path.basename(xml_path)}")
+            
         except Exception as e:
-            if log_func: log_func(f"❌ 변환 실패: {e}")
-            return pth_path, None
+            time.sleep(2.0)
+            if os.path.exists(xml_path) and os.path.exists(bin_path):
+                if log_func: log_func(f"✅ 변환 완료: {os.path.basename(xml_path)}")
+                if os.path.exists(temp_onnx):
+                    try: os.remove(temp_onnx)
+                    except: pass
+            else:
+                error_msg = str(e).strip()
+                if not error_msg: error_msg = "알 수 없는 최적화 경고"
+                if log_func: log_func(f"❌ 변환 실패: {error_msg}")
+                return pth_path, None
+            
     return pth_path, (xml_path if os.path.exists(xml_path) else None)
 
 def get_hardware_gpu_name():
@@ -155,23 +270,23 @@ UI_TEXTS = {
         'lang_ko': '한국어',
         'lang_en': '영어',
         'input_image': '입력 이미지:',
-        'input_image_tip': '업스케일할 원본 이미지를 선택합니다.',
+        'input_image_tip': '',
         'output_folder': '출력 폴더:',
-        'output_folder_tip': '변환된 파일을 저장할 폴더를 선택합니다.',
+        'output_folder_tip': '',
         'scale': '배율:',
-        'scale_tip': '2x, 4x, 8x 업스케일 배율을 선택합니다.',
+        'scale_tip': '',
         'input_video': '입력 비디오:',
-        'input_video_tip': '업스케일할 원본 비디오 파일을 선택합니다.',
+        'input_video_tip': '',
         'split_count': '분할 개수:',
-        'split_count_tip': '비디오를 몇 개의 파트로 나눌지 지정합니다.',
+        'split_count_tip': '',
         'target_parts': '대상 파트:',
-        'target_parts_tip': "업스케일할 파트 범위를 입력하세요. (예: 0~5)\n시작 번호는 0이며, 쉼표로 여러 구간을 지정할 수 있습니다.\n\nEnter the part range to upscale. (e.g., 0~5)\nStarting index is 0. Multiple ranges can be separated by commas.",
+        'target_parts_tip': "",
         'tile_size': '타일 크기:',
-        'tile_size_tip': 'Real-ESRGAN 블록 처리 크기입니다.\n0은 전체 프레임 처리, VRAM 부족 시 100~400 권장.',
+        'tile_size_tip': '',
         'browse': '찾아보기',
         'upscale_image': '이미지 업스케일 시작',
         'run_video_upscale': '비디오 업스케일 시작',
-        'cpu_recommend': '[CPU 모드] {0} 사용 중. 속도가 매우 느릴 수 있습니다. 2x 권장 및 분할 개수를 최대한 높이세요.',
+        'cpu_recommend': '[CPU 모드] {0} 사용 중. 2x 권장 및 분할 개수를 최대한 높이세요.',
         'igpu_recommend': '[Intel QSV 가속] {0} 사용 중. 2x 권장, 타일 크기를 200~400으로 조절하세요.',
         'gpu_recommend_high': 'GPU: {0} - 권장: 2x/4x 사용, 고해상도 시 tile 400~600 권장.',
         'gpu_recommend_mid': 'GPU: {0} - 권장: 2x 사용, tile 200~300 권장.',
@@ -194,7 +309,7 @@ UI_TEXTS = {
     },
     'en': {
         'tab_video_merge': 'Video Editor',
-        'merge_video_list': 'Video List (Drag to reorder):',
+        'merge_video_list': 'Video List:',
         'add_video': 'Add Video',
         'remove_selected': 'Remove Selected',
         'clear_all': 'Clear All',
@@ -211,23 +326,23 @@ UI_TEXTS = {
         'lang_ko': 'Korean',
         'lang_en': 'English',
         'input_image': 'Input Image:',
-        'input_image_tip': 'Select the source image.',
+        'input_image_tip': '',
         'output_folder': 'Output Folder:',
-        'output_folder_tip': 'Select save folder.',
+        'output_folder_tip': '',
         'scale': 'Scale:',
-        'scale_tip': 'Select 2x, 4x, or 8x ratio.',
+        'scale_tip': '',
         'input_video': 'Input Video:',
-        'input_video_tip': 'Select source video.',
+        'input_video_tip': '',
         'split_count': 'Split Count:',
-        'split_count_tip': 'Set video split parts.',
+        'split_count_tip': '',
         'target_parts': 'Target Parts:',
-        'target_parts_tip': "Enter the part range to upscale. (e.g., 0~5)\nStarting index is 0. Multiple ranges can be separated by commas.",
+        'target_parts_tip': "",
         'tile_size': 'Tile Size:',
-        'tile_size_tip': '0 for whole frame, 100~400 recommended for stability.',
+        'tile_size_tip': '',
         'browse': 'Browse',
         'upscale_image': 'Start Image Upscale',
         'run_video_upscale': 'Start Video Upscale',
-        'cpu_recommend': '[CPU Mode] Using {0}. Processing may be very slow. 2x recommended and increase split count.',
+        'cpu_recommend': '[CPU Mode] Using {0}. 2x recommended and increase split count.',
         'igpu_recommend': '[Intel QSV Acceleration] Using {0}. 2x recommended, adjust tile size to 200~400.',
         'gpu_recommend_high': 'GPU: {0} - Recommended: 2x/4x, tile 400~600.',
         'gpu_recommend_mid': 'GPU: {0} - Recommended: 2x, tile 200~300.',
@@ -239,7 +354,7 @@ UI_TEXTS = {
         'error_no_output': '❌ Select output folder.',
         'error_target_parts': '❌ Parts must be integers.',
         'error_no_target_parts': '❌ Enter target part.',
-        'video_timeline': 'Timeline (Merge Order)',
+        'video_timeline': 'Timeline',
         'video_sources': 'Source Media List',
         'add': 'Import',
         'add_to_timeline': 'Add to Timeline',

@@ -12,7 +12,6 @@ from queue import Queue, Empty
 from openvino.runtime import Core, AsyncInferQueue
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QLineEdit, QSpinBox, QComboBox, QTextEdit, QProgressBar, QVBoxLayout
 from PyQt5.QtCore import QThread, pyqtSignal, Qt, QTimer
-from setting import prepare_model
 
 class ModelSetupWorker(QThread):
     log = pyqtSignal(str)
@@ -20,9 +19,6 @@ class ModelSetupWorker(QThread):
     def __init__(self, weights_dir):
         super().__init__()
         self.weights_dir = weights_dir
-    def run(self):
-        for scale in [2, 4]: prepare_model(scale, self.weights_dir, self.log.emit)
-        self.finished.emit()
 
 def run_split_upscale(input_path, num_splits, target_parts, model_path, tile=800, output_folder='./Vid', progress_callback=None, log_callback=None):
     core = ov.Core()

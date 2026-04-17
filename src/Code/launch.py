@@ -24,73 +24,9 @@ from setting import (
     UI_TEXTS, apply_app_theme, get_device_info_text, 
     get_device_recommendation, get_detailed_system_info,
     get_torch_install_command, get_hardware_gpu_name,
-    prepare_model
+    prepare_model, prepare_ffmpeg
 )
-
 from VideoMerge import VideoMergeTab
-
-def ensure_ffmpeg(log_func=None, progress_func=None, finished_callback=None):
-    def download_task():
-        if shutil.which("ffmpeg"):
-            if finished_callback: finished_callback(True)
-            return
-
-        current_file_dir = os.path.dirname(os.path.abspath(__file__))
-        src_dir = os.path.dirname(current_file_dir)
-        ffmpeg_dir = os.path.join(src_dir, "ffmpeg")
-        
-        actual_bin_path = ""
-        if os.path.exists(ffmpeg_dir):
-            for root, dirs, files in os.walk(ffmpeg_dir):
-                if "ffmpeg.exe" in files:
-                    actual_bin_path = root
-                    break
-
-        if actual_bin_path:
-            if actual_bin_path not in os.environ["PATH"]:
-                os.environ["PATH"] += os.pathsep + actual_bin_path
-            if finished_callback: finished_callback(True)
-            return
-
-        if log_func: log_func("⚠️ FFmpeg를 찾을 수 없습니다. src/ffmpeg에 설치를 시작합니다...")
-        
-        try:
-            os.makedirs(ffmpeg_dir, exist_ok=True)
-            zip_path = os.path.join(ffmpeg_dir, "ffmpeg.zip")
-            url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-            
-            def report_progress(block_num, block_size, total_size):
-                if total_size > 0 and progress_func:
-                    percent = int(block_num * block_size * 100 / total_size)
-                    progress_func(min(percent, 100))
-
-            urllib.request.urlretrieve(url, zip_path, reporthook=report_progress)
-            
-            if log_func: log_func("📦 압축 해제 중...")
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(ffmpeg_dir)
-            
-            new_bin_path = ""
-            for root, dirs, files in os.walk(ffmpeg_dir):
-                if "ffmpeg.exe" in files:
-                    new_bin_path = root
-                    break
-            
-            if new_bin_path:
-                if new_bin_path not in os.environ["PATH"]:
-                    os.environ["PATH"] += os.pathsep + new_bin_path
-                if log_func: log_func(f"✅ FFmpeg 설치 완료: {new_bin_path}")
-            
-            if os.path.exists(zip_path):
-                os.remove(zip_path)
-                
-            if finished_callback: finished_callback(True)
-        except Exception as e:
-            if log_func: log_func(f"❌ 설치 중 오류 발생: {e}")
-            if finished_callback: finished_callback(False)
-
-    thread = threading.Thread(target=download_task, daemon=True)
-    thread.start()
 
 class UpscaleApp(QMainWindow):
     def __init__(self):
@@ -100,6 +36,32 @@ class UpscaleApp(QMainWindow):
         self.translations = []
         self.verify_torch_environment()
         self.initUI()
+        
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(500, self.check_ffmpeg_on_launch)
+
+    def check_ffmpeg_on_launch(self):
+        def on_init_ffmpeg_ready(success):
+            self.vid_progress.setValue(0)
+            if success:
+                self.vid_log.append(f"[{time.strftime('%H:%M:%S')}] ✅ FFmpeg 준비 완료")
+            else:
+                self.vid_log.append(f"[{time.strftime('%H:%M:%S')}] ❌ FFmpeg 초기 준비 실패")
+
+        self.ensure_ffmpeg(
+            log_func=self.vid_log.append,
+            progress_func=self.vid_progress.setValue,
+            finished_callback=on_init_ffmpeg_ready
+        )
+
+    def ensure_ffmpeg(self, log_func=None, progress_func=None, finished_callback=None):
+        def download_task():
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            success = prepare_ffmpeg(base_dir, log_func, progress_func)
+            if finished_callback: finished_callback(success)
+
+        thread = threading.Thread(target=download_task, daemon=True)
+        thread.start()
     
     def verify_torch_environment(self):
         need_fix = False
@@ -281,7 +243,7 @@ class UpscaleApp(QMainWindow):
         input_path = self.vid_input_edit.text()
         output_folder = self.vid_output_edit.text()
         num_splits = self.split_spin.value()
-        model_path = self.vid_model_combo.currentData() # 수정: vid_scale_combo 대신 vid_model_combo 사용
+        model_path = self.vid_model_combo.currentData()
         
         if not os.path.exists(input_path):
             QMessageBox.warning(self, "Error", "입력 비디오 파일을 찾을 수 없습니다.")
@@ -292,37 +254,20 @@ class UpscaleApp(QMainWindow):
             self.vid_run_btn.setEnabled(True)
             return
 
-        try:
-            raw_text = self.target_parts_edit.text()
-            target_parts = []
-            for item in raw_text.split(','):
-                if '~' in item:
-                    start, end = map(int, item.split('~'))
-                    target_parts.extend(range(start, end + 1))
-                else:
-                    target_parts.append(int(item.strip()))
-            target_parts = list(set(target_parts))
-        except Exception:
-            QMessageBox.warning(self, "Error", "Invalid target parts. Use format '0~2' or '0,1,2'")
-            self.vid_run_btn.setEnabled(True)
-            return
-
-        tile = self.tile_spin.value()
-
         def on_ffmpeg_ready(success):
             from UpscaleVid import VideoUpscaleWorker
             if success:
                 self.vid_log.append(f"[{time.strftime('%H:%M:%S')}] {self.t('start_video')}")
-                self.vid_worker = VideoUpscaleWorker(input_path, output_folder, num_splits, target_parts, tile, model_path)
+                self.vid_worker = VideoUpscaleWorker(input_path, output_folder, num_splits, self.target_parts_edit.text(), self.tile_spin.value(), model_path)
                 self.vid_worker.progress.connect(self.vid_progress.setValue)
                 self.vid_worker.log.connect(self.vid_log.append)
                 self.vid_worker.finished.connect(self.on_video_finished)
                 self.vid_worker.start()
             else:
-                self.vid_log.append("❌ FFmpeg 준비 실패로 작업을 중단합니다.")
+                self.vid_log.append("❌ FFmpeg 설치 실패로 작업을 중단합니다.")
                 self.vid_run_btn.setEnabled(True)
 
-        ensure_ffmpeg(
+        self.ensure_ffmpeg(
             log_func=self.vid_log.append,
             progress_func=self.vid_progress.setValue,
             finished_callback=on_ffmpeg_ready
