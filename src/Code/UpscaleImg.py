@@ -8,7 +8,7 @@ import urllib.request
 import glob
 from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-    QComboBox, QProgressBar, QTextEdit, QVBoxLayout, QApplication, QSpinBox
+    QComboBox, QProgressBar, QTextEdit, QVBoxLayout, QApplication, QSpinBox, QSizePolicy
 )
 from PyQt5.QtCore import QThread, pyqtSignal, Qt, QTimer
 from setting import get_device_info_text, get_device_recommendation, prepare_model
@@ -81,42 +81,72 @@ class ImageUpscaleWorker(QThread):
 
 def create_label_with_info(parent, text_key, tip_key):
     layout = QHBoxLayout()
+    btn = QPushButton("?")
+    btn.setFixedSize(20, 20)
+    btn.setToolTip(parent.t(tip_key))
+    btn.setStyleSheet("""
+        QPushButton { 
+            border-radius: 10px; 
+            background-color: #1a73e8; 
+            color: #ffffff; 
+            font-weight: bold; 
+            border: None;
+        }
+        QPushButton:hover { 
+            background-color: #e0e0e0; 
+            color: #202124;           
+        }
+    """)
+    
     label = QLabel(parent.t(text_key))
-    info_btn = QPushButton("?")
-    info_btn.setFixedSize(20, 20)
-    info_btn.setToolTip(parent.t(tip_key))
-    info_btn.setStyleSheet("QPushButton { border-radius: 10px; background-color: #e0e0e0; font-weight: bold; }")
     layout.addWidget(label)
-    layout.addWidget(info_btn)
+    layout.addWidget(btn)
     layout.addStretch()
+    
     container = QWidget()
     container.setLayout(layout)
+    container.label_obj = label
     return container
 
 def create_image_tab(parent, translations):
     layout = QVBoxLayout()
+    
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     weights_dir = os.path.join(base_dir, 'weights')
     os.makedirs(weights_dir, exist_ok=True)
+
     input_layout = QHBoxLayout()
-    input_layout.addWidget(create_label_with_info(parent, 'input_image', 'input_image_tip'))
+    input_container = create_label_with_info(parent, 'input_image', 'input_image_tip')
+    parent.img_input_label = input_container.label_obj
+    input_layout.addWidget(input_container)
+    
     parent.img_input_edit = QLineEdit('')
     input_layout.addWidget(parent.img_input_edit)
     parent.img_browse_btn = QPushButton(parent.t('browse'))
     parent.img_browse_btn.clicked.connect(parent.browse_image_input)
     input_layout.addWidget(parent.img_browse_btn)
     layout.addLayout(input_layout)
+
     output_layout = QHBoxLayout()
-    output_layout.addWidget(create_label_with_info(parent, 'output_folder', 'output_folder_tip'))
+    output_container = create_label_with_info(parent, 'output_folder', 'output_folder_tip')
+    parent.img_output_label = output_container.label_obj
+    output_layout.addWidget(output_container)
+    
     parent.img_output_edit = QLineEdit('')
     output_layout.addWidget(parent.img_output_edit)
     parent.img_output_browse_btn = QPushButton(parent.t('browse'))
     parent.img_output_browse_btn.clicked.connect(parent.browse_output_folder)
     output_layout.addWidget(parent.img_output_browse_btn)
     layout.addLayout(output_layout)
+
     model_sel_layout = QHBoxLayout()
-    model_sel_layout.addWidget(QLabel("모델 선택:"))
+    model_container = create_label_with_info(parent, 'model_select', 'model_select_tip')
+    parent.img_model_label = model_container.label_obj
+    model_sel_layout.addWidget(model_container)
+    
     parent.img_model_combo = QComboBox()
+    parent.img_model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
     def refresh_models():
         parent.img_model_combo.clear()
         use_cuda = torch.cuda.is_available()
@@ -126,28 +156,44 @@ def create_image_tab(parent, translations):
             files.extend(glob.glob(os.path.join(weights_dir, "**", p), recursive=True))
         for f in files:
             parent.img_model_combo.addItem(os.path.relpath(f, weights_dir), f)
-        parent.img_log.append("🔄 모델 목록이 갱신되었습니다.")
+            
+        if hasattr(parent, 'img_log'):
+            log_msg = "🔄 모델 목록이 갱신되었습니다." if parent.language == 'ko' else "🔄 Model list refreshed."
+            parent.img_log.append(log_msg)
+
     model_sel_layout.addWidget(parent.img_model_combo)
+    
     btn_refresh = QPushButton("🔄")
     btn_refresh.setFixedSize(30, 30)
     btn_refresh.clicked.connect(refresh_models)
     model_sel_layout.addWidget(btn_refresh)
-    model_sel_layout.addWidget(QLabel("타일 크기:"))
+    
+    refresh_models()
+
+    tile_container = create_label_with_info(parent, 'tile_size', 'tile_size_tip')
+    parent.img_tile_label = tile_container.label_obj
+    model_sel_layout.addWidget(tile_container)
+    
     parent.img_tile_spin = QSpinBox()
     parent.img_tile_spin.setRange(0, 1024)
     parent.img_tile_spin.setValue(400)
     parent.img_tile_spin.setSingleStep(100)
     model_sel_layout.addWidget(parent.img_tile_spin)
     layout.addLayout(model_sel_layout)
+
+    from setting import get_device_recommendation
     parent.img_recommend_label = QLabel(get_device_recommendation(parent.language))
     layout.addWidget(parent.img_recommend_label)
+    
     parent.img_progress = QProgressBar()
     layout.addWidget(parent.img_progress)
     parent.img_log = QTextEdit()
     parent.img_log.setReadOnly(True)
     layout.addWidget(parent.img_log)
+
     parent.img_run_btn = QPushButton(parent.t('upscale_image'))
     parent.img_run_btn.setFixedHeight(40)
+
     def start_upscale():
         input_path = parent.img_input_edit.text()
         output_folder = parent.img_output_edit.text()
@@ -160,13 +206,15 @@ def create_image_tab(parent, translations):
         parent.img_worker.log.connect(parent.img_log.append)
         parent.img_worker.finished.connect(parent.on_image_finished)
         parent.img_worker.start()
+
     parent.img_run_btn.clicked.connect(start_upscale)
     layout.addWidget(parent.img_run_btn)
+
     parent.setup_worker = ModelSetupWorker(weights_dir)
     parent.setup_worker.log.connect(parent.img_log.append)
     parent.setup_worker.finished.connect(refresh_models)
     QTimer.singleShot(500, parent.setup_worker.start)
+
     tab = QWidget()
     tab.setLayout(layout)
-    
     return tab

@@ -26,6 +26,9 @@ from setting import (
 )
 from VideoMerge import VideoMergeTab
 
+ffmpeg_path = shutil.which('ffmpeg')
+print(f"DEBUG: 현재 시스템이 인식하는 FFmpeg 경로: {ffmpeg_path}")
+
 class UpscaleApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -70,30 +73,58 @@ class UpscaleApp(QMainWindow):
                 except Exception as e:
                     QMessageBox.critical(self, "실패", f"설치 중 오류: {e}")
 
+    def t(self, key):
+        return UI_TEXTS[self.language].get(key, key)
+    
     def initUI(self):
-        from UpscaleImg import create_image_tab
-        from UpscaleVid import create_video_tab
-        self.resize(1050, 850)
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
-        self.base_layout = QVBoxLayout(self.central_widget)
-        self.tabs = QTabWidget()
-        self.image_tab = create_image_tab(self, self.translations)
-        self.video_tab = create_video_tab(self, self.translations)
-        self.video_merge_tab = VideoMergeTab(self)
-        self.tabs.addTab(self.image_tab, "")
-        self.tabs.addTab(self.video_tab, "")
-        self.tabs.addTab(self.video_merge_tab, "")
-        self.base_layout.addWidget(self.tabs)
-        self.info_panel = QHBoxLayout()
-        self.sys_info_label = QLabel(get_detailed_system_info())
-        self.info_panel.addWidget(self.sys_info_label)
-        self.base_layout.addLayout(self.info_panel)
-        self.update_language()
-        apply_app_theme(self, self.theme)
-        self.show()
+        self.setWindowIcon(QIcon('icon.png'))
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
 
-    def t(self, key): return UI_TEXTS[self.language].get(key, key)
+        self.create_menu()
+
+        self.tabs = QTabWidget()
+        main_layout.addWidget(self.tabs)
+
+        from UpscaleImg import create_image_tab
+        self.image_tab = create_image_tab(self, [])
+        self.tabs.addTab(self.image_tab, "")
+
+        from UpscaleVid import create_video_tab
+        self.video_tab = create_video_tab(self, [])
+        self.tabs.addTab(self.video_tab, "")
+
+        self.video_merge_tab = VideoMergeTab(self)
+        self.tabs.addTab(self.video_merge_tab, "")
+
+        info_layout = QHBoxLayout()
+        self.device_info_label = QLabel()
+        info_layout.addWidget(self.device_info_label)
+        main_layout.addLayout(info_layout)
+
+        self.update_language()
+        self.apply_theme(self.theme)
+        self.resize(1000, 800)
+        self.show()
+    
+    def create_menu(self):
+        menubar = self.menuBar()
+        
+        self.theme_menu = menubar.addMenu("")
+        self.light_action = self.theme_menu.addAction("", lambda: self.apply_theme('light'))
+        self.dark_action = self.theme_menu.addAction("", lambda: self.apply_theme('dark'))
+
+        self.lang_menu = menubar.addMenu("")
+        self.ko_action = self.lang_menu.addAction("", lambda: self.change_language('ko'))
+        self.en_action = self.lang_menu.addAction("", lambda: self.change_language('en'))
+        
+    def apply_theme(self, theme="light"):
+        if theme: 
+            self.theme = theme
+
+        from setting import apply_app_theme
+        apply_app_theme(QApplication.instance(), self.theme)
 
     def change_theme(self, theme):
         self.theme = theme
@@ -116,15 +147,79 @@ class UpscaleApp(QMainWindow):
         if folder:
             if self.tabs.currentIndex() == 0: self.img_output_edit.setText(folder)
             else: self.vid_output_edit.setText(folder)
+            
+    def setup_menus(self):
+        menubar = self.menuBar()
+        
+        theme_menu = menubar.addMenu(self.t('menu_theme'))
+        light_action = theme_menu.addAction(self.t('menu_light'))
+        light_action.triggered.connect(lambda: self.change_theme('light'))
+        dark_action = theme_menu.addAction(self.t('menu_dark'))
+        dark_action.triggered.connect(lambda: self.change_theme('dark'))
+
+        lang_menu = menubar.addMenu(self.t('menu_language'))
+        ko_action = lang_menu.addAction(self.t('lang_ko'))
+        ko_action.triggered.connect(lambda: self.change_language('ko'))
+        en_action = lang_menu.addAction(self.t('lang_en'))
+        en_action.triggered.connect(lambda: self.change_language('en'))
 
     def update_language(self):
-        lang = self.language
-        self.setWindowTitle(UI_TEXTS[lang]['window_title'])
-        self.tabs.setTabText(0, UI_TEXTS[lang]['tab_image'])
-        self.tabs.setTabText(1, UI_TEXTS[lang]['tab_video'])
-        self.tabs.setTabText(2, UI_TEXTS[lang]['tab_video_merge'])
-        self.img_run_btn.setText(UI_TEXTS[lang]['upscale_image'])
-        self.vid_run_btn.setText(UI_TEXTS[lang]['run_video_upscale'])
+        self.setWindowTitle(self.t('window_title'))
+        self.tabs.setTabText(0, self.t('tab_image'))
+        self.tabs.setTabText(1, self.t('tab_video'))
+        self.tabs.setTabText(2, self.t('tab_video_merge'))
+
+        if hasattr(self, 'device_info_label'):
+            header = self.t('device_label')
+            system_spec = get_detailed_system_info() 
+            self.device_info_label.setText(f"{header} {system_spec}")
+
+        if hasattr(self, 'img_input_label'):
+            self.img_input_label.setText(self.t('input_image'))
+            self.img_input_label.parent().findChild(QPushButton).setToolTip(self.t('input_image_tip'))
+            self.img_output_label.setText(self.t('output_folder'))
+            self.img_output_label.parent().findChild(QPushButton).setToolTip(self.t('output_folder_tip'))
+            self.img_model_label.setText(self.t('model_select'))
+            self.img_model_label.parent().findChild(QPushButton).setToolTip(self.t('model_select_tip'))
+            self.img_tile_label.setText(self.t('tile_size'))
+            self.img_tile_label.parent().findChild(QPushButton).setToolTip(self.t('tile_size_tip'))
+            self.img_run_btn.setText(self.t('upscale_image'))
+            self.img_recommend_label.setText(get_device_recommendation(self.language))
+
+        if hasattr(self, 'vid_input_label'):
+            self.vid_input_label.setText(self.t('input_video'))
+            self.vid_input_label.parent().findChild(QPushButton).setToolTip(self.t('input_video_tip'))
+            self.vid_output_label.setText(self.t('output_folder'))
+            self.vid_output_label.parent().findChild(QPushButton).setToolTip(self.t('output_folder_tip'))
+            self.vid_split_label.setText(self.t('split_count'))
+            self.vid_split_label.parent().findChild(QPushButton).setToolTip(self.t('split_count_tip'))
+            self.vid_tile_label.setText(self.t('tile_size'))
+            self.vid_tile_label.parent().findChild(QPushButton).setToolTip(self.t('tile_size_tip'))
+            self.vid_target_label.setText(self.t('target_parts'))
+            self.vid_target_label.parent().findChild(QPushButton).setToolTip(self.t('target_parts_tip'))
+            self.vid_run_btn.setText(self.t('run_video_upscale'))
+            self.vid_recommend_label.setText(get_device_recommendation(self.language))
+            
+            if hasattr(self, 'vid_model_label'):
+                self.vid_model_label.setText(self.t('model_select'))
+                self.vid_model_label.parent().findChild(QPushButton).setToolTip(self.t('model_select_tip'))
+
+        if hasattr(self, 'video_merge_tab'):
+            vmt = self.video_merge_tab
+            vmt.lbl_input.setText(self.t('input_folder'))
+            vmt.lbl_audio.setText(self.t('audio_file'))
+            vmt.btn_browse_input.setText(self.t('select_folder'))
+            vmt.btn_browse_audio.setText(self.t('select_audio'))
+            vmt.btn_clear_audio.setText(self.t('clear_audio'))
+            vmt.lbl_worklist.setText(self.t('work_list'))
+            vmt.btn_run.setText(self.t('run_auto_merge'))
+
+        self.theme_menu.setTitle(self.t('menu_theme'))
+        self.lang_menu.setTitle(self.t('menu_language'))
+        self.light_action.setText(self.t('menu_light'))
+        self.dark_action.setText(self.t('menu_dark'))
+        self.ko_action.setText(self.t('lang_ko'))
+        self.en_action.setText(self.t('lang_en'))
 
     def run_image_upscale(self):
         from UpscaleImg import ImageUpscaleWorker
@@ -150,9 +245,11 @@ class UpscaleApp(QMainWindow):
         self.vid_run_btn.setEnabled(False)
         input_path = self.vid_input_edit.text()
         output_folder = self.vid_output_edit.text()
-        num_splits = self.split_spin.value()
+        num_splits = self.vid_split_spin.value()
         model_path = self.vid_model_combo.currentData()
+        tile_size = self.vid_tile_spin.value()
         target_text = self.target_parts_edit.text()
+    
         try:
             target_parts = []
             for part in target_text.replace(" ", "").split(','):
@@ -171,7 +268,7 @@ class UpscaleApp(QMainWindow):
             if success:
                 self.vid_worker = VideoUpscaleWorker(
                     input_path, output_folder, num_splits, 
-                    target_parts, self.tile_spin.value(), model_path
+                    target_parts, tile_size, model_path
                 )
                 self.vid_worker.progress.connect(self.vid_progress.setValue)
                 self.vid_worker.log.connect(self.vid_log.append)
@@ -179,8 +276,14 @@ class UpscaleApp(QMainWindow):
                 self.vid_worker.start()
             else:
                 self.vid_run_btn.setEnabled(True)
-        self.ensure_ffmpeg(log_func=self.vid_log.append, progress_func=self.vid_progress.setValue, finished_callback=on_ffmpeg_ready)
+                self.vid_log.append("FFmpeg 준비 실패")
 
+        self.ensure_ffmpeg(
+            log_func=self.vid_log.append, 
+            progress_func=self.vid_progress.setValue, 
+            finished_callback=on_ffmpeg_ready
+        )
+        
     def on_video_finished(self, msg):
         self.vid_log.append(msg)
         self.vid_run_btn.setEnabled(True)
