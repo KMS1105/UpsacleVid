@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import (
     QFileDialog, QMessageBox, QApplication, QTextEdit, QLineEdit, QProgressBar
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from setting import UI_TEXTS
 
 def find_ffmpeg_bin(search_root):
     for root, dirs, files in os.walk(search_root):
@@ -131,8 +132,8 @@ class VideoMergeTab(QWidget):
         self.merge_progress = QProgressBar()
         layout.addWidget(self.merge_progress)
 
-        self.btn_run = QPushButton(self.parent.t('run_auto_merge'))
-        self.btn_run.setFixedHeight(40); self.btn_run.clicked.connect(self.run_auto_merge)
+        self.btn_run = QPushButton(self.parent.t('run_merge'))
+        self.btn_run.setFixedHeight(40); self.btn_run.clicked.connect(self.run_merge)
         layout.addWidget(self.btn_run)
 
     def natural_sort_key(self, s):
@@ -148,13 +149,25 @@ class VideoMergeTab(QWidget):
                 self.input_video_paths = files
                 self.merge_log.clear()
                 self.merge_progress.setValue(0)
-                self.merge_log.append(f"📁 {len(files)}개 파일을 순서대로 찾았습니다.")
-                for f in files: self.merge_log.append(f" -> {os.path.basename(f)}")
+                self.merge_log.append(self.parent.t('log_files_found').format(len(files)))
+                
+                for f in files:
+                    file_name = os.path.basename(f)
+                    self.merge_log.append(self.parent.t('log_file_item').format(file_name))
             else:
-                QMessageBox.warning(self, "경고", "해당 폴더에 영상 파일이 없습니다.")
+                QMessageBox.warning(
+                    self, 
+                    self.parent.t('warn_no_video_title'), 
+                    self.parent.t('warn_no_video_msg')
+                )
 
     def select_audio_file(self):
-        file, _ = QFileDialog.getOpenFileName(...)
+        file, _ = QFileDialog.getOpenFileName(
+            self,                                  
+            self.parent.t('audio_select_title'),  
+            '',                                    
+            self.parent.t('audio_select_filter')   
+        )
         if file:
             self.selected_audio_path = file
             self.audio_path_edit.setText(os.path.basename(file))
@@ -165,11 +178,21 @@ class VideoMergeTab(QWidget):
         self.audio_path_edit.clear()
         self.merge_log.append(self.parent.t('log_audio_none'))
 
-    def run_auto_merge(self):
+    def run_merge(self):
         if not self.input_video_paths:
-            QMessageBox.warning(self, "Warning", "먼저 병합할 폴더를 선택해주세요.")
+            QMessageBox.warning(
+                self, 
+                self.parent.t('warn_no_folder_title'), 
+                self.parent.t('warn_no_folder_msg')
+            )
             return
-        save_path, _ = QFileDialog.getSaveFileName(self, '결과 저장', 'final_merged.mp4', 'MP4 (*.mp4);;TS (*.ts)')
+
+        save_path, _ = QFileDialog.getSaveFileName(
+                self, 
+                self.parent.t('save_dialog_title'), 
+                'final_merged.mp4', 
+                self.parent.t('save_dialog_filter')
+            )
         if save_path:
             self.btn_run.setEnabled(False)
             self.merge_progress.setValue(0)
@@ -182,8 +205,16 @@ class VideoMergeTab(QWidget):
     def on_merge_finished(self, success, msg):
         self.btn_run.setEnabled(True)
         if success:
-            self.merge_log.append(f"✅ 완료: {msg}")
-            QMessageBox.information(self, "완료", "영상 병합이 성공적으로 끝났습니다.")
+            self.merge_log.append(self.parent.t('log_merge_success').format(msg))
+            QMessageBox.information(
+                self, 
+                self.parent.t('msg_merge_success_title'), 
+                self.parent.t('msg_merge_success_text')
+            )
         else:
-            self.merge_log.append(f"❌ 실패: {msg}")
-            QMessageBox.critical(self, "오류", f"병합 중 오류가 발생했습니다: {msg}")
+            self.merge_log.append(self.parent.t('log_merge_fail').format(msg))
+            QMessageBox.critical(
+                self, 
+                self.parent.t('msg_merge_fail_title'), 
+                self.parent.t('msg_merge_fail_text').format(msg)
+            )

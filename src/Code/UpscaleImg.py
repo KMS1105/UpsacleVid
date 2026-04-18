@@ -15,6 +15,7 @@ from setting import (
     UI_TEXTS, get_device_info_text, 
     get_device_recommendation, prepare_model
 )
+from launch import UpscaleApp
 
 try:
     import torchvision.transforms.functional as F
@@ -25,24 +26,30 @@ except ImportError:
 class ModelSetupWorker(QThread):
     log = pyqtSignal(str)
     finished = pyqtSignal()
-    def __init__(self, weights_dir):
+
+    def __init__(self, weights_dir, lang='ko'):
         super().__init__()
         self.weights_dir = weights_dir
+        self.lang = lang
+
     def run(self):
         for scale in [2, 4]:
-            prepare_model(scale, self.weights_dir, self.log.emit)
+            prepare_model(scale, self.weights_dir, self.log.emit, lang=self.lang)
         self.finished.emit()
 
 class ImageUpscaleWorker(QThread):
     progress = pyqtSignal(int)
     log = pyqtSignal(str)
     finished = pyqtSignal(str)
-    def __init__(self, input_path, output_folder, model_path, tile_size):
+    
+    def __init__(self, input_path, output_folder, model_path, tile_size, lang='ko'):
         super().__init__()
         self.input_path = input_path
         self.output_folder = output_folder
         self.model_path = model_path
         self.tile_size = tile_size
+        self.lang = lang
+        
     def run(self):
         try: 
             self.progress.emit(10)
@@ -52,7 +59,7 @@ class ImageUpscaleWorker(QThread):
             scale = 2 if 'x2' in model_name.lower() else 4
             img_array = np.fromfile(self.input_path, np.uint8)
             img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-            if img is None: raise Exception("이미지를 읽을 수 없습니다.")
+            if img is None: raise Exception("❌ Unable to read the image.")
             use_cuda = torch.cuda.is_available()
             from realesrgan import RealESRGANer
             from basicsr.archs.rrdbnet_arch import RRDBNet
@@ -207,7 +214,13 @@ def create_image_tab(parent, translations):
         tile_size = parent.img_tile_spin.value()
         if not input_path or not os.path.exists(input_path): return
         parent.img_run_btn.setEnabled(False)
-        parent.img_worker = ImageUpscaleWorker(input_path, output_folder, model_path, tile_size)
+        parent.img_worker = ImageUpscaleWorker(
+            input_path, 
+            output_folder, 
+            model_path, 
+            tile_size, 
+            lang=parent.language
+        )
         parent.img_worker.progress.connect(parent.img_progress.setValue)
         parent.img_worker.log.connect(parent.img_log.append)
         parent.img_worker.finished.connect(parent.on_image_finished)

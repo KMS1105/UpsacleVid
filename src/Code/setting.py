@@ -27,7 +27,7 @@ def prepare_ffmpeg(base_dir, log_func=None, progress_func=None):
                 os.environ["PATH"] += os.pathsep + bin_path
             return True
 
-    if log_func: log_func(f"[{time.strftime('%H:%M:%S')}] ⏳ FFmpeg가 없어 다운로드를 시작합니다...")
+    if log_func: log_func(f"[{time.strftime('%H:%M:%S')}] ⏳ FFmpeg not found, starting download...")
     os.makedirs(ffmpeg_dir, exist_ok=True)
     
     url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
@@ -42,7 +42,7 @@ def prepare_ffmpeg(base_dir, log_func=None, progress_func=None):
 
         urllib.request.urlretrieve(url, zip_path, reporthook=report_hook)
         
-        if log_func: log_func(f"[{time.strftime('%H:%M:%S')}] 📦 압축 해제 중")
+        if log_func: log_func(f"[{time.strftime('%H:%M:%S')}] 📦 Decompressing...")
         if progress_func: progress_func(96) 
         
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
@@ -64,13 +64,14 @@ def prepare_ffmpeg(base_dir, log_func=None, progress_func=None):
             return True
             
     except Exception as e:
-        if log_func: log_func(f"[{time.strftime('%H:%M:%S')}] ❌ FFmpeg 설치 오류: {str(e)}")
+        if log_func: log_func(f"[{time.strftime('%H:%M:%S')}] ❌ FFmpeg installation error: {str(e)}")
         if progress_func: progress_func(0)
         return False
         
     return False
 
-def prepare_model(scale, weights_dir, log_func=None):
+def prepare_model(scale, weights_dir, log_func=None, lang='ko'):
+    texts = UI_TEXTS.get(lang, UI_TEXTS['en'])
     if scale not in MODEL_INFO: return None, None
     
     import torch
@@ -86,16 +87,31 @@ def prepare_model(scale, weights_dir, log_func=None):
     temp_onnx = os.path.join(weights_dir, f"temp_scale_{scale}.onnx")
 
     if not os.path.exists(pth_path):
-        if log_func: log_func(f"⏳ {pth_name} 다운로드 중...")
+        if log_func: log_func(f"⏳ {pth_name} Downloading...")
         os.makedirs(weights_dir, exist_ok=True)
+        
+        try:
+            urllib.request.urlretrieve(model_data['url'], pth_path)
+        except urllib.error.HTTPError as e:
+            from PySide6.QtWidgets import QMessageBox 
+
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setWindowTitle(texts['err_conn_title'])
+            msg.setText(texts['err_conn_text'])
+            msg.setInformativeText(texts['err_conn_info'].format(e))
+            msg.exec()
+            
+            return pth_path, None
+            
         urllib.request.urlretrieve(model_data['url'], pth_path)
-        if log_func: log_func(f"✅ 다운로드 완료")
+        if log_func: log_func("✅ Download complete")
 
     if not torch.cuda.is_available() and not os.path.exists(xml_path):
-        if log_func: log_func(f"🔄 Intel GPU 가속 모델 변환 중 (Scale x{scale})...")
+        if log_func:
+            log_func("🔄 Converting model for Intel GPU acceleration (Scale x{scale})...")
         try:
             model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=scale)
-            
             loadnet = None
             try:
                 loadnet = torch.load(pth_path, map_location='cpu')
@@ -108,7 +124,7 @@ def prepare_model(scale, weights_dir, log_func=None):
                     urllib.request.urlretrieve(model_data['url'], pth_path)
                     loadnet = torch.load(pth_path, map_location='cpu')
                 except Exception as e:
-                    if log_func: log_func(f"❌ 파일 교체 실패: {e}")
+                    if log_func: log_func("✅ Conversion completed: {0}".format(os.path.basename(xml_path)))
                     return pth_path, None
 
             key = 'params_ema' if 'params_ema' in loadnet else ('params' if 'params' in loadnet else None)
@@ -141,21 +157,24 @@ def prepare_model(scale, weights_dir, log_func=None):
                 try: os.remove(temp_onnx)
                 except: pass
                 
-            if log_func: log_func(f"✅ 변환 완료: {os.path.basename(xml_path)}")
+            if log_func: log_func("✅ Conversion completed: {0}".format(os.path.basename(xml_path)))
             
         except Exception as e:
             time.sleep(2.0)
             if os.path.exists(xml_path) and os.path.exists(bin_path):
-                if log_func: log_func(f"✅ 변환 완료: {os.path.basename(xml_path)}")
-                if os.path.exists(temp_onnx):
-                    try: os.remove(temp_onnx)
-                    
-                    except: pass
+                if log_func: 
+                    log_func("✅ Conversion completed: {0}".format(os.path.basename(xml_path)))
+                    if os.path.exists(temp_onnx):
+                        try: os.remove(temp_onnx)
+                        except: pass
             else:
                 error_msg = str(e).strip()
-                if not error_msg: error_msg = "알 수 없는 최적화 경고"
-                if log_func: log_func(f"❌ 변환 실패: {error_msg}")
-                return pth_path, None
+                if not error_msg: 
+                    error_msg = texts.get('log_unknown_opt_warn', 'Unknown error')
+                
+                if log_func: 
+                    log_func(texts['log_convert_fail'].format(error_msg))
+                return pth_path, None   
             
     return pth_path, (xml_path if os.path.exists(xml_path) else None)
 
@@ -190,10 +209,10 @@ def get_detailed_system_info():
                 gpu = torch.cuda.get_device_name(0)
             else:
                 h_gpu = get_hardware_gpu_name()
-                gpu = f"{h_gpu} (CUDA 미지원)" if h_gpu else (get_intel_gpu_name() or "CPU")
+                gpu = f"{h_gpu} (CUDA not supported)" if h_gpu else (get_intel_gpu_name() or "CPU")
         except:
             h_gpu = get_hardware_gpu_name()
-            gpu = f"{h_gpu} (라이브러리 오류)" if h_gpu else "Torch 미설치"
+            gpu = f"{h_gpu} (Library error)" if h_gpu else 'Torch not installed'
         return f"CPU: {cpu} | RAM: {mem:.1f}GB | GPU: {gpu}"
     except: return "Error"
 
@@ -253,10 +272,10 @@ def format_time(seconds):
 
 UI_TEXTS = {
     'ko': {
-        'window_title': '영상/이미지 업스케일러 Pro',
+        'window_title': '영상/이미지 업스케일러',
         'tab_image': '이미지 업스케일',
         'tab_video': '비디오 업스케일',
-        'tab_video_merge': '영상 자동 합치기',
+        'tab_video_merge': '영상 병합',
         'browse': '찾아보기',
         'model_select_tip': 'src/weights 안의 모델 중 하나를 선택하세요.',
         'output_folder': '출력 폴더:',
@@ -283,7 +302,7 @@ UI_TEXTS = {
         'select_audio': '오디오 선택',
         'clear_audio': '초기화',
         'work_list': '🎬 작업 목록',
-        'run_auto_merge': '영상 자동 합치기 실행',
+        'run_merge': '영상 병합 실행',
         'menu_theme': '테마',
         'menu_light': '라이트 모드',
         'menu_dark': '다크 모드',
@@ -319,9 +338,39 @@ UI_TEXTS = {
         'log_merge_fail': "❌ 병합 실패",
         'lang_name': "한국어",
         'log_lang_changed': "🌐 언어가 변경되었습니다: {}",
+        'err_input_title': '입력 오류',
+        'err_input_msg': '입력 파일을 선택해주세요.',
+        'err_part_title': '입력 오류',
+        'err_part_msg': '대상 파트 형식이 올바르지 않습니다. (예: 0~9)',
+        'log_files_found': '📁 {0}개 파일을 순서대로 찾았습니다.',
+        'log_file_item': ' -> {0}',
+        'warn_no_video_title': '경고',
+        'warn_no_video_msg': '해당 폴더에 영상 파일이 없습니다.',
+        'warn_no_folder_title': '경고',
+        'warn_no_folder_msg': '먼저 병합할 폴더를 선택해주세요.',
+        'save_dialog_title': '결과 저장',
+        'save_dialog_filter': 'MP4 파일 (*.mp4);;TS 파일 (*.ts)',
+        'log_merge_success': '✅ 완료: {0}',
+        'log_merge_fail': '❌ 실패: {0}',
+        'msg_merge_success_title': '완료',
+        'msg_merge_success_text': '영상 병합이 성공적으로 끝났습니다.',
+        'msg_merge_fail_title': '오류',
+        'msg_merge_fail_text': '병합 중 오류가 발생했습니다: {0}',
+        'log_convert_success': '✅ 변환 완료: {0}',
+        'log_convert_fail': '❌ 변환 실패: {0}',
+        'log_unknown_opt_warn': '알 수 없는 최적화 경고',
+        'log_file_replace_fail': '❌ 파일 교체 실패: {0}',
+        'log_intel_convert': '🔄 Intel GPU 가속 모델 변환 중 (Scale x{0})...',
+        'log_download_complete': '✅ 다운로드 완료',
+        'err_conn_title': '연결 오류',
+        'err_conn_text': '다운로드 실패 (Time-out)',
+        'err_conn_info': '네트워크 문제로 모델을 다운로드할 수 없습니다.\n\n오류 내용: {0}\n\n프로그램을 다시 실행해주세요.',
+        'audio_select_title': '오디오 파일 선택',
+        'audio_select_filter': '오디오 파일 (*.mp3 *.wav *.aac *.m4a);;영상 파일 (*.mp4 *.mov *.avi *.mkv)',
+        'log_audio_source': '🎵 오디오 소스 설정됨: {0}',
     },
     'en': {
-        'window_title': 'Image/Video Upscaler Pro',
+        'window_title': 'Image/Video Upscaler',
         'tab_image': 'Image Upscale',
         'tab_video': 'Video Upscale',
         'tab_video_merge': 'Video Auto Merge',
@@ -351,7 +400,7 @@ UI_TEXTS = {
         'select_audio': 'Select Audio',
         'clear_audio': 'Reset',
         'work_list': '🎬 Work List',
-        'run_auto_merge': 'Run Auto Merge',
+        'run_merge': 'Run Merge',
         'menu_theme': 'Theme',
         'menu_light': 'Light Mode',
         'menu_dark': 'Dark Mode',
@@ -387,7 +436,37 @@ UI_TEXTS = {
         'log_merge_fail': "❌ Merge failed",
         'lang_name': "English",
         'log_lang_changed': "🌐 Language changed to: {}",
-    }
+        'err_input_title': 'Input Error',
+        'err_input_msg': 'Please select an input file.',
+        'err_part_title': 'Input Error',
+        'err_part_msg': 'Invalid target part format. (e.g., 0~9)',
+        'log_files_found': '📁 Found {0} files in order.',
+        'log_file_item': ' -> {0}',
+        'warn_no_video_title': 'Warning',
+        'warn_no_video_msg': 'No video files found in the folder.',
+        'warn_no_folder_title': 'Warning',
+        'warn_no_folder_msg': 'Please select a folder to merge first.',
+        'save_dialog_title': 'Save Result',
+        'save_dialog_filter': 'MP4 Files (*.mp4);;TS Files (*.ts)',
+        'log_merge_success': '✅ Success: {0}',
+        'log_merge_fail': '❌ Failed: {0}',
+        'msg_merge_success_title': 'Success',
+        'msg_merge_success_text': 'Video merge completed successfully.',
+        'msg_merge_fail_title': 'Error',
+        'msg_merge_fail_text': 'An error occurred during merge: {0}',
+        'log_convert_success': '✅ Conversion completed: {0}',
+        'log_convert_fail': '❌ Conversion failed: {0}',
+        'log_unknown_opt_warn': 'Unknown optimization warning',
+        'log_file_replace_fail': '❌ File replacement failed: {0}',
+        'log_intel_convert': '🔄 Converting model for Intel GPU acceleration (Scale x{0})...',
+        'log_download_complete': '✅ Download complete',
+        'err_conn_title': 'Connection Error',
+        'err_conn_text': 'Download Failed (Time-out)',
+        'err_conn_info': 'Cannot download model due to network issues.\n\nError: {0}\n\nPlease restart the program.',
+        'audio_select_title': 'Select Audio File',
+        'audio_select_filter': 'Audio Files (*.mp3 *.wav *.aac *.m4a);;Video Files (*.mp4 *.mov *.avi *.mkv)',
+        'log_audio_source': '🎵 Audio source set: {0}',
+    }   
 }
 
 def apply_app_theme(widget, theme):

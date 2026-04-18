@@ -329,13 +329,17 @@ def create_video_tab(parent, translations):
             files.extend(glob.glob(os.path.join(weights_dir, "**", p), recursive=True))
         for f in files: 
             parent.vid_model_combo.addItem(os.path.relpath(f, weights_dir), f)
+            
+        if hasattr(parent, 'vid_log'):
+            log_msg = "🔄 모델 목록이 갱신되었습니다." if parent.language == 'ko' else "🔄 Model list refreshed."
+            parent.vid_log.append(log_msg)
         
     refresh_v_models()
     model_row.addWidget(parent.vid_model_combo)
-    btn_ref = QPushButton("🔄")
-    btn_ref.setFixedSize(30, 30)
-    btn_ref.clicked.connect(refresh_v_models)
-    model_row.addWidget(btn_ref)
+    btn_refresh = QPushButton("🔄")
+    btn_refresh.setFixedSize(30, 30)
+    btn_refresh.clicked.connect(refresh_v_models)
+    model_row.addWidget(btn_refresh)
     layout.addLayout(model_row)
 
     for key, spin_attr, val in [('split_count', 'vid_split_spin', 10), ('tile_size', 'vid_tile_spin', 800)]:

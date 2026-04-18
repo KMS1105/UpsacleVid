@@ -29,7 +29,7 @@ from VideoMerge import VideoMergeTab
 class UpscaleApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.language = 'ko'
+        self.language = 'en'
         self.theme = 'light'
         self.translations = []
         self.verify_torch_environment()
@@ -177,7 +177,7 @@ class UpscaleApp(QMainWindow):
         if hasattr(self, 'vid_recommend_label'):
             self.vid_recommend_label.setText(get_device_recommendation(self.language))
         if hasattr(self, 'video_merge_tab'):
-            self.video_merge_tab.btn_run.setText(self.t('run_auto_merge'))
+            self.video_merge_tab.btn_run.setText(self.t('run_merge'))
 
         if hasattr(self, 'device_info_label'):
             header = self.t('device_label')
@@ -225,7 +225,7 @@ class UpscaleApp(QMainWindow):
             vmt.btn_browse_audio.setText(self.t('select_audio'))
             vmt.btn_clear_audio.setText(self.t('clear_audio'))
             vmt.lbl_worklist.setText(self.t('work_list'))
-            vmt.btn_run.setText(self.t('run_auto_merge'))
+            vmt.btn_run.setText(self.t('run_merge'))
 
         self.theme_menu.setTitle(self.t('menu_theme'))
         self.lang_menu.setTitle(self.t('menu_language'))
@@ -251,9 +251,12 @@ class UpscaleApp(QMainWindow):
         output_folder = self.img_output_edit.text()
         model_path = self.img_model_combo.currentData()
         tile_size = self.img_tile_spin.value()
-        if not input_path or not os.path.exists(input_path):
-            QMessageBox.warning(self, "Error", "입력 파일을 선택해주세요.")
-            return
+        lang = getattr(self, 'lang', 'ko')
+        QMessageBox.warning(
+            self, 
+            UI_TEXTS[lang]['err_input_title'], 
+            UI_TEXTS[lang]['err_input_msg']
+        )
         self.img_run_btn.setEnabled(False)
         self.img_worker = ImageUpscaleWorker(input_path, output_folder, model_path, tile_size)
         self.img_worker.progress.connect(self.img_progress.setValue)
@@ -327,7 +330,12 @@ class UpscaleApp(QMainWindow):
                 else:
                     target_parts.append(int(part))
         except ValueError:
-            QMessageBox.warning(self, "입력 오류", "대상 파트 형식이 올바르지 않습니다. (예: 0~9)")
+            lang = getattr(self, 'lang', 'ko')
+            QMessageBox.warning(
+                self, 
+                UI_TEXTS[lang]['err_part_title'], 
+                UI_TEXTS[lang]['err_part_msg']
+            )
             self.vid_run_btn.setEnabled(True)
             return
         
