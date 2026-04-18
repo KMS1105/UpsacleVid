@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import (
     QProgressBar, QTextEdit, QComboBox, QSpinBox, QFrame, QMenuBar, QMenu,
     QSizePolicy, QDesktopWidget
 )
-from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QRect
+from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QRect, QMetaObject, Q_ARG
 from PyQt5.QtGui import QIcon, QFont, QPixmap, QColor
 
 from setting import (
@@ -49,7 +49,10 @@ class UpscaleApp(QMainWindow):
         
     def ensure_ffmpeg(self, log_func=None, progress_func=None, finished_callback=None):
         def download_task():
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if getattr(sys, 'frozen', False):
+                base_dir = os.path.join(os.path.dirname(sys.executable), "src")
+            else:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             success = prepare_ffmpeg(base_dir, log_func, progress_func)
             if finished_callback: finished_callback(success)
         threading.Thread(target=download_task, daemon=True).start()
@@ -281,36 +284,39 @@ class UpscaleApp(QMainWindow):
         self.last_log = raw_msg
         
         timestamp = time.strftime('%H:%M:%S')
-        translated = raw_msg  
+        translated = raw_msg 
 
         if '|' in raw_msg:
             parts = raw_msg.split('|', 1)
-            key = parts[0]
-            data_str = parts[1]
-
-            if key in UI_TEXTS[self.language]:
+            key, data_str = parts[0], parts[1]
+            if key in UI_TEXTS.get(self.language, {}):
                 try:
                     if key == 'log_device_info':
                         from setting import get_hardware_gpu_name
-                        device_name = get_hardware_gpu_name()
-                        translated = self.t(key).format(device_name)
-                    if key == 'log_model_info':
+                        translated = self.t(key).format(get_hardware_gpu_name())
+                    elif key == 'log_model_info':
                         model_name = os.path.basename(data_str).replace('.pth', '').replace('.xml', '')
                         translated = self.t(key).format(model_name)
                     elif key == 'log_res_optimized':
                         translated = self.t(key).format(*data_str.split('x'))
                     else:
-                        data_args = data_str.split('|')
-                        translated = self.t(key).format(*data_args)
+                        translated = self.t(key).format(*data_str.split('|'))
                 except Exception:
                     translated = self.t(key)
-            else:
-                translated = raw_msg 
-        else:
-            if raw_msg in UI_TEXTS[self.language]:
-                translated = self.t(raw_msg)
+        elif raw_msg in UI_TEXTS.get(self.language, {}):
+            translated = self.t(raw_msg)
         
-        self.vid_log.append(f"[{timestamp}] {translated}")
+        final_text = f"[{timestamp}] {translated}"
+        if self.vid_log.document().blockCount() > 500:
+            self.vid_log.clear()
+            self.vid_log.append("[System] Log cleared to prevent memory overflow.")
+
+        QMetaObject.invokeMethod(
+            self.vid_log, 
+            "append", 
+            Qt.QueuedConnection, 
+            Q_ARG(str, final_text)
+        )
 
     def run_video_upscale(self):
         self.vid_run_btn.setEnabled(False)

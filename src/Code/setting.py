@@ -73,6 +73,9 @@ def prepare_ffmpeg(base_dir, log_func=None, progress_func=None):
 def prepare_model(scale, weights_dir, log_func=None, lang='ko'):
     texts = UI_TEXTS.get(lang, UI_TEXTS['en'])
     if scale not in MODEL_INFO: return None, None
+    if getattr(sys, 'frozen', False):
+        if not weights_dir.endswith("src\\weights") and not weights_dir.endswith("src/weights"):
+            weights_dir = os.path.join(weights_dir, "src", "weights")
     
     import torch
     import openvino as ov
