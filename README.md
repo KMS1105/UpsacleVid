@@ -22,6 +22,8 @@ PyQt5 GUI와 **NVIDIA CUDA / Intel OpenVINO / CPU 자동 전환 시스템**을 �
 requirements.txt
 ```
 
+---
+
 ## 🛠 필요 라이브러리 설치
 
 ### Powershell
@@ -158,6 +160,8 @@ It also includes **automatic model download, OpenVINO conversion, and FFmpeg set
       └── UpscaleVid.py # Video upscaling
 requirements.txt
 ```
+
+---
 
 ## 🛠 Required Library Installation
 
