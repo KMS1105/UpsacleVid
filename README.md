@@ -1,4 +1,4 @@
-# 🚀 AI Upscaler Project (None Finisshed)
+# 🚀 AI Upscaler Project (None Finished)
 
 이 프로젝트는 **Real-ESRGAN** 기반으로 이미지 및 비디오의 해상도를 향상시키는 데스크톱 애플리케이션입니다.
 PyQt5 GUI와 **NVIDIA CUDA / Intel OpenVINO / CPU 자동 전환 시스템**을 통해 다양한 환경에서 최적의 성능을 제공합니다.
