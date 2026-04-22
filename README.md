@@ -19,6 +19,7 @@ PyQt5 GUI와 **NVIDIA CUDA / Intel OpenVINO / CPU 자동 전환 시스템**을 �
       ├── VideoMerge.py # 영상 병합 기능
       ├── UpscaleImg.py # 이미지 업스케일
       └── UpscaleVid.py # 비디오 업스케일
+requirements.txt
 ```
 
 ---
@@ -157,6 +158,7 @@ It also includes **automatic model download, OpenVINO conversion, and FFmpeg set
       ├── VideoMerge.py # Video merging feature
       ├── UpscaleImg.py # Image upscaling
       └── UpscaleVid.py # Video upscaling
+requirements.txt
 ```
 
 ---
