@@ -14,11 +14,10 @@ PyQt5 GUI와 **NVIDIA CUDA / Intel OpenVINO / CPU 자동 전환 시스템**을 �
  ├── weights/           # 모델 자동 다운로드 및 OpenVINO 변환 결과
  ├── ffmpeg/            # FFmpeg 자동 다운로드
  ├── 📁 requirements/
- ├── 📁 requirements/
  │   ├── 📁 Intel/
- │   │    └── requirements.txt #Intel environment configuration settings
+ │   │    └── requirements.txt #인텔 환경 라이브러리 설정
  │   └── 📁 Nvida/
- │        └── requirements.txt #Nvida CUDA environment configuration settings
+ │        └── requirements.txt #엔비디아 CUDA 환경 라이브러리 설정
  └── 📁 Code/
       ├── Launch.py     # 메인 실행 및 UI
       ├── setting.py    # 시스템 감지 / 추천 설정 / 테마
@@ -157,11 +156,10 @@ It also includes **automatic model download, OpenVINO conversion, and FFmpeg set
 📁 src/
  ├── weights/           # Auto-downloaded models and OpenVINO converted files
  ├── ffmpeg/            # FFmpeg auto-download
- ├── 📁 requirements/
  │   ├── 📁 Intel/
- │   │    └── requirements.txt #인텔 환경 라이브러리 설정
+ │   │    └── requirements.txt #Intel environment configuration settings
  │   └── 📁 Nvida/
- │        └── requirements.txt #엔비디아 CUDA 환경 라이브러리 설정
+ │        └── requirements.txt #Nvida CUDA environment configuration settings
  └── 📁 Code/
       ├── Launch.py     # Main execution and UI
       ├── setting.py    # System detection / recommendations / theme
