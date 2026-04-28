@@ -8,28 +8,8 @@ from PyQt5.QtWidgets import (
     QFileDialog
 )
 from PyQt5.QtCore import QThread, pyqtSignal
+from setting import prepare_bg_model, DragLineEdit
 
-from setting import prepare_bg_model
-
-class DragLineEdit(QLineEdit):
-    dropped = pyqtSignal(str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.accept()
-        else:
-            event.ignore()
-
-    def dropEvent(self, event):
-        files = [u.toLocalFile() for u in event.mimeData().urls()]
-        if files:
-            path = files[0]
-            self.setText(path)
-            self.dropped.emit(path)
 
 class RemoveBGWorker(QThread):
     progress = pyqtSignal(int)

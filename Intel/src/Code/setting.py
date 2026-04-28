@@ -10,6 +10,28 @@ import gc
 import zipfile
 import shutil
 from UI_TEXTS import UI_TEXTS
+from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtWidgets import QLineEdit
+
+class DragLineEdit(QLineEdit):
+    dropped = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        files = [u.toLocalFile() for u in event.mimeData().urls()]
+        if files:
+            path = files[0]
+            self.setText(path)
+            self.dropped.emit(path)
 
 MODEL_INFO = {
     2: {'name': 'RealESRGAN_x2plus', 'url': 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth'},

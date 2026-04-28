@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import QThread, pyqtSignal, Qt, QTimer
 from setting import (
     UI_TEXTS, get_device_info_text, 
-    get_device_recommendation, prepare_model
+    get_device_recommendation, prepare_model, DragLineEdit
 )
 from launch import UpscaleApp
 

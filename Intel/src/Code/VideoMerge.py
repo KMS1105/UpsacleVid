@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QFileDialog, QMessageBox, QApplication, QTextEdit, QLineEdit, QProgressBar
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from setting import UI_TEXTS
+from setting import UI_TEXTS, DragLineEdit
 
 def find_ffmpeg_bin(search_root):
     for root, dirs, files in os.walk(search_root):
@@ -123,14 +123,14 @@ class VideoMergeTab(QWidget):
         self.btn_clear_audio.clicked.connect(self.clear_audio_selection)
         audio_layout.addWidget(self.btn_clear_audio)
         layout.addLayout(audio_layout)
+        
+        self.merge_progress = QProgressBar()
+        layout.addWidget(self.merge_progress)
 
         self.lbl_worklist = QLabel(self.parent.t('work_list'))
         layout.addWidget(self.lbl_worklist)
         self.merge_log = QTextEdit(); self.merge_log.setReadOnly(True)
         layout.addWidget(self.merge_log)
-
-        self.merge_progress = QProgressBar()
-        layout.addWidget(self.merge_progress)
 
         self.btn_run = QPushButton(self.parent.t('run_merge'))
         self.btn_run.setFixedHeight(40); self.btn_run.clicked.connect(self.run_merge)
