@@ -5,6 +5,7 @@ import sys
 import urllib.request
 import os
 import time
+import torch
 import gc
 import zipfile
 import shutil
@@ -71,18 +72,88 @@ def prepare_ffmpeg(base_dir, log_func=None, progress_func=None):
         
     return False
 
-def prepare_bg_model(model_name, log_func=None, lang='ko'):
+import os
+import subprocess
+import torch
+
+def prepare_bg_model(log_func=None):
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     weights_dir = os.path.join(base_dir, 'RemBG')
-    
-    onnx_path = os.path.join(weights_dir, f"{model_name}.onnx")
-    
-    if os.path.exists(onnx_path):
-        return onnx_path
-    else:
-        if log_func:
-            log_func(f"❌ Error: {model_name}.onnx not found.")
+
+    bisenet_pth = os.path.join(weights_dir, "79999_iter.pth")
+    bisenet_onnx = os.path.join(weights_dir, "bisenet.onnx")
+    bisenet_xml = os.path.join(weights_dir, "bisenet.xml")
+
+    modnet = os.path.join(weights_dir, "modnet_photographic_portrait_matting.onnx")
+
+    face_xml = os.path.join(weights_dir, "face-detection-adas-0001.xml")
+    face_bin = os.path.join(weights_dir, "face-detection-adas-0001.bin")
+
+    edge_onnx = os.path.join(weights_dir, "model_fp16.onnx")
+
+    if not os.path.exists(modnet):
+        if log_func: log_func("error_missing_modnet")
         return None
+
+    if not (os.path.exists(face_xml) and os.path.exists(face_bin)):
+        if log_func: log_func("error_missing_face_model")
+        return None
+
+    if not os.path.exists(edge_onnx):
+        if log_func: log_func("error_missing_model_fp16_onnx")
+        return None
+
+    if not os.path.exists(bisenet_xml):
+
+        if not os.path.exists(bisenet_onnx):
+
+            if not os.path.exists(bisenet_pth):
+                if log_func: log_func("error_missing_bisenet_pth")
+                return None
+
+            if log_func: log_func("converting_pth_to_onnx")
+
+            import sys
+            sys.path.append(weights_dir)
+
+            from rembg.model import BiSeNet
+            import torch
+
+            net = BiSeNet(n_classes=19)
+            net.load_state_dict(torch.load(bisenet_pth, map_location='cpu'))
+            net.eval()
+
+            dummy = torch.randn(1, 3, 512, 512)
+
+            torch.onnx.export(
+                net,
+                dummy,
+                bisenet_onnx,
+                input_names=["input"],
+                output_names=["output"],
+                opset_version=11,
+                do_constant_folding=True
+            )
+
+        if log_func: log_func("converting_onnx_to_ir")
+
+        try:
+            subprocess.run([
+                "mo",
+                "--input_model", bisenet_onnx,
+                "--input_shape", "[1,3,512,512]",
+                "--compress_to_fp16"
+            ], cwd=weights_dir, check=True)
+        except Exception as e:
+            if log_func: log_func(f"error_mo_failed: {str(e)}")
+            return None
+
+    return {
+        "modnet": modnet,
+        "bisenet": bisenet_xml,
+        "face": face_xml,
+        "model_fp16": edge_onnx
+    }
 
 def prepare_model(scale, weights_dir, log_func=None, lang='ko'):
     texts = UI_TEXTS.get(lang, UI_TEXTS['en'])
