@@ -24,6 +24,7 @@ from setting import (
     get_hardware_gpu_name, prepare_model, prepare_ffmpeg
 )
 from VideoMerge import VideoMergeTab
+from RemoveBG import RemoveBGTab
 
 class UpscaleApp(QMainWindow):
     def __init__(self):
@@ -79,6 +80,9 @@ class UpscaleApp(QMainWindow):
 
         self.video_merge_tab = VideoMergeTab(self)
         self.tabs.addTab(self.video_merge_tab, "")
+
+        self.remove_bg_tab = RemoveBGTab(self)
+        self.tabs.addTab(self.remove_bg_tab, self.t('tab_remove_bg'))
 
         info_layout = QHBoxLayout()
         self.device_info_label = QLabel()
