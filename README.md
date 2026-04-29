@@ -1,4 +1,4 @@
-# Video Processing Project (None Finished)
+# Video Processing Project (Not Finished)
 
 
 이 프로젝트는 이미지/비디오 업스케일, 비디오 배경 제거를 지원하는 비디오 처리 애플리케이션입니다.
