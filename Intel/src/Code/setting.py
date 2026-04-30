@@ -7,6 +7,7 @@ import os
 import time
 import torch
 import gc
+import glob
 import zipfile
 import shutil
 from UI_TEXTS import UI_TEXTS
@@ -32,6 +33,21 @@ class DragLineEdit(QLineEdit):
             path = files[0]
             self.setText(path)
             self.dropped.emit(path)
+            
+def refresh_models(combo_box, weights_dir, log_widget=None, language='ko'):
+    combo_box.clear()
+    use_cuda = torch.cuda.is_available()
+    pats = ["*.pth"] if use_cuda else ["*.onnx", "*.xml"]
+    files = []
+    if not os.path.exists(weights_dir):
+        os.makedirs(weights_dir, exist_ok=True)
+    for p in pats: 
+        files.extend(glob.glob(os.path.join(weights_dir, "**", p), recursive=True))
+    for f in files: 
+        combo_box.addItem(os.path.basename(f), f)
+    if log_widget is not None:
+        log_msg = "🔄 모델 목록이 갱신되었습니다." if language == 'ko' else "🔄 Model list refreshed."
+        log_widget.append(log_msg)
 
 MODEL_INFO = {
     2: {'name': 'RealESRGAN_x2plus', 'url': 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth'},
@@ -40,60 +56,80 @@ MODEL_INFO = {
 
 def prepare_ffmpeg(base_dir, log_func=None, progress_func=None):
     ffmpeg_dir = os.path.join(base_dir, "ffmpeg")
-    
-    if shutil.which("ffmpeg"):
-        return True
+    ffmpeg_exe = os.path.join(ffmpeg_dir, "bin", "ffmpeg.exe")
 
-    for root, dirs, files in os.walk(ffmpeg_dir):
-        if "ffmpeg.exe" in files:
-            bin_path = root
-            if bin_path not in os.environ["PATH"]:
-                os.environ["PATH"] += os.pathsep + bin_path
-            return True
+    if os.path.exists(ffmpeg_exe):
+        try:
+            result = subprocess.run(
+                [ffmpeg_exe, "-version"], 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT, 
+                text=True, 
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=5
+            )
+            if "ffmpeg version" in result.stdout:
+                if log_func: log_func("FFmpeg is already installed and verified.")
+                return True
+            else:
+                shutil.rmtree(ffmpeg_dir, ignore_errors=True)
+        except Exception:
+            shutil.rmtree(ffmpeg_dir, ignore_errors=True)
 
-    if log_func: log_func(f"[{time.strftime('%H:%M:%S')}] ⏳ FFmpeg not found, starting download...")
-    os.makedirs(ffmpeg_dir, exist_ok=True)
-    
+    zip_path = os.path.join(base_dir, "ffmpeg.zip")
+    tmp_zip = zip_path + ".tmp"
     url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-    zip_path = os.path.join(ffmpeg_dir, "ffmpeg.zip")
     
     try:
-        def report_hook(block_num, block_size, total_size):
-            if total_size > 0 and progress_func:  
-                percent = int(block_num * block_size * 95 / total_size)
-                if percent <= 95:
-                    progress_func(percent)
+        if log_func: log_func("FFmpeg downloading (Essentials)...")
+        
+        opener = urllib.request.build_opener()
+        opener.addheaders = [('User-agent', 'Mozilla/5.0')]
+        urllib.request.install_opener(opener)
 
-        urllib.request.urlretrieve(url, zip_path, reporthook=report_hook)
+        def progress_report(block_num, block_size, total_size):
+            if total_size > 0:
+                percent = int(block_num * block_size * 100 / total_size)
+                if progress_func: progress_func(min(percent, 99))
+
+        urllib.request.urlretrieve(url, tmp_zip, progress_report)
         
-        if log_func: log_func(f"[{time.strftime('%H:%M:%S')}] 📦 Decompressing...")
-        if progress_func: progress_func(96) 
-        
+        if os.path.exists(zip_path): os.remove(zip_path)
+        os.rename(tmp_zip, zip_path)
+
+        if progress_func: progress_func(100)
+        time.sleep(0.1) 
+
+        if log_func: log_func("Extracting FFmpeg...")
+
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(ffmpeg_dir)
-        
-        if progress_func: progress_func(100) 
-        time.sleep(0.5) 
-        
-        new_bin_path = ""
-        for root, dirs, files in os.walk(ffmpeg_dir):
-            if "ffmpeg.exe" in files:
-                new_bin_path = root
-                break
-        
-        if new_bin_path:
-            if new_bin_path not in os.environ["PATH"]:
-                os.environ["PATH"] += os.pathsep + new_bin_path
-            if os.path.exists(zip_path): os.remove(zip_path)
-            return True
+            if os.path.exists(ffmpeg_dir):
+                shutil.rmtree(ffmpeg_dir, ignore_errors=True)
+            zip_ref.extractall(base_dir)
             
-    except Exception as e:
-        if log_func: log_func(f"[{time.strftime('%H:%M:%S')}] ❌ FFmpeg installation error: {str(e)}")
-        if progress_func: progress_func(0)
-        return False
-        
-    return False
+            extracted_folder = [f for f in os.listdir(base_dir) if f.startswith("ffmpeg-") and os.path.isdir(os.path.join(base_dir, f))]
+            if extracted_folder:
+                source_path = os.path.join(base_dir, extracted_folder[0])
+                os.rename(source_path, ffmpeg_dir)
 
+        if os.path.exists(zip_path):
+            try: os.remove(zip_path)
+            except: pass
+            
+        if os.path.exists(ffmpeg_exe):
+            final_check = subprocess.run([ffmpeg_exe, "-version"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, creationflags=subprocess.CREATE_NO_WINDOW, timeout=5)
+            if "ffmpeg version" in final_check.stdout:
+                if log_func: log_func("FFmpeg is ready and verified.")
+                time.sleep(0.2) 
+                return True
+        
+        return False
+    
+    except Exception as e:
+        if log_func: log_func(f"FFmpeg error: {str(e)}")
+        if os.path.exists(tmp_zip): os.remove(tmp_zip)
+        return False
+    
 import os
 import subprocess
 import torch

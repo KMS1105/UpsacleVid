@@ -46,17 +46,55 @@ class UpscaleApp(QMainWindow):
                 self.vid_log.append(f"[{timestamp}] {self.t('log_ffmpeg_ready')}")
             else:
                 self.vid_log.append(f"[{timestamp}] {self.t('log_ffmpeg_fail')}")
-        self.ensure_ffmpeg(log_func=self.vid_log.append, progress_func=self.vid_progress.setValue, finished_callback=on_init_ffmpeg_ready)
+        
+        self.ensure_ffmpeg(
+            log_func=lambda msg: self.vid_log.append(f"[{time.strftime('%H:%M:%S')}] {msg}"),
+            progress_func=self.vid_progress.setValue,
+            finished_callback=on_init_ffmpeg_ready
+        )
         
     def ensure_ffmpeg(self, log_func=None, progress_func=None, finished_callback=None):
-        def download_task():
-            if getattr(sys, 'frozen', False):
-                base_dir = os.path.join(os.path.dirname(sys.executable), "src")
-            else:
-                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            success = prepare_ffmpeg(base_dir, log_func, progress_func)
-            if finished_callback: finished_callback(success)
-        threading.Thread(target=download_task, daemon=True).start()
+        class FFmpegWorker(QThread):
+            log_signal = pyqtSignal(str)
+            progress_signal = pyqtSignal(int)
+            finished_signal = pyqtSignal(bool)
+
+            def __init__(self, log_f, prog_f):
+                super().__init__()
+                self.temp_log_func = log_f
+                self.temp_prog_func = prog_f
+
+            def run(self):
+                if getattr(sys, 'frozen', False):
+                    base_dir = os.path.join(os.path.dirname(sys.executable), "src")
+                else:
+                    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                
+                success = prepare_ffmpeg(
+                    base_dir, 
+                    log_func=self.log_signal.emit, 
+                    progress_func=self.progress_signal.emit
+                )
+                self.finished_signal.emit(success)
+
+        self.ffmpeg_worker = FFmpegWorker(log_func, progress_func)
+
+        if log_func:
+            self.ffmpeg_worker.log_signal.connect(log_func)
+        if progress_func:
+            self.ffmpeg_worker.progress_signal.connect(progress_func)
+
+        if finished_callback:
+            def on_complete(success):
+                finished_callback(success)
+                self.ffmpeg_worker.deleteLater()
+            self.ffmpeg_worker.finished_signal.connect(on_complete)
+
+        self.ffmpeg_worker.start()
+        
+    def _handle_ffmpeg_finished(self, callback, success):
+        if callback:
+            callback(success)
     
     def verify_torch_environment(self):
         need_fix = False

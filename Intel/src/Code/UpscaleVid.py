@@ -13,9 +13,9 @@ from openvino import Core, AsyncInferQueue
 from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QPushButton, 
     QLineEdit, QSpinBox, QComboBox, QTextEdit, 
-    QProgressBar, QVBoxLayout, QSizePolicy)
+    QProgressBar, QVBoxLayout, QSizePolicy, QFileDialog)
 from PyQt5.QtCore import QThread, pyqtSignal, Qt, QTimer
-from setting import UI_TEXTS
+from setting import UI_TEXTS, refresh_models
 
 class DragLineEdit(QLineEdit):
     dropped = pyqtSignal(str)
@@ -268,107 +268,70 @@ class VideoUpscaleWorker(QThread):
             self.finished.emit(f"log_upscale_complete|{os.path.abspath(res)}")
         except Exception as e: self.finished.emit(f"log_error|{str(e)}")
 
-def create_label_with_info(parent, text_key, tip_key):
-    layout = QHBoxLayout()
-    btn = QPushButton("?")
-    btn.setFixedSize(20, 20)
-    btn.setToolTip(parent.t(tip_key))
-    btn.setStyleSheet("""
-        QPushButton { 
-            border-radius: 10px; 
-            background-color: #e0e0e0; 
-            color: #202124#ffffff; 
-            font-weight: bold; 
-            border: None;
-        }
-        QPushButton:hover { 
-            background-color: #1a73e8; 
-            color: #ffffff;           
-        }
-    """)
-    
-    label = QLabel(parent.t(text_key))
-    layout.addWidget(label)
-    layout.addWidget(btn)
-    layout.addStretch()
-    
-    container = QWidget()
-    container.setLayout(layout)
-    container.label_obj = label
-    return container
-
 def create_video_tab(parent, translations):
-    layout = QVBoxLayout()
-    weights_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'weights')
-    os.makedirs(weights_dir, exist_ok=True)
+    widget = QWidget()
+    layout = QVBoxLayout(widget)
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    weights_dir = os.path.join(base_dir, 'weights')
 
-    for key, edit_attr, btn_attr, click_func in [
-        ('input_video', 'vid_input_edit', 'vid_browse_btn', parent.browse_video_input), 
-        ('output_folder', 'vid_output_edit', 'vid_output_browse_btn', parent.browse_output_folder)
-    ]:
-        row = QHBoxLayout()
-        container = create_label_with_info(parent, key, f"{key}_tip")
-        
-        label_obj = container.label_obj
-        label_obj.text_key = key
-        
-        if key == 'input_video': 
-            parent.vid_input_label = container.label_obj
-        else: 
-            parent.vid_output_label = container.label_obj
-        row.addWidget(container)
-        
-        edit = QLineEdit()
-        setattr(parent, edit_attr, edit)
-        row.addWidget(edit)
-        
-        new_btn = QPushButton(parent.t('browse'))
-        new_btn.text_key = 'browse'  
-        setattr(parent, btn_attr, new_btn)
-        parent.layout().addWidget(new_btn)
-        getattr(parent, btn_attr).clicked.connect(click_func)
-        row.addWidget(new_btn)
-        layout.addLayout(row)
+    def create_label_with_info(p, key, tip_key):
+        container = QWidget()
+        l = QHBoxLayout(container)
+        l.setContentsMargins(0,0,0,0)
+        label = QLabel(p.t(key))
+        info_btn = QPushButton("?")
+        info_btn.setFixedSize(20, 20)
+        info_btn.setToolTip(p.t(tip_key))
+        info_btn.setStyleSheet("""
+            QPushButton { 
+                border-radius: 10px; 
+                background-color: #e0e0e0; 
+                color: #202124#ffffff; 
+                font-weight: bold; 
+                border: None;
+            }
+            QPushButton:hover { 
+                background-color: #1a73e8; 
+                color: #ffffff;           
+            }
+        """)
+        l.addWidget(label)
+        l.addWidget(info_btn)
+        l.addStretch()
+        container.label_obj = label
+        return container
+
+    input_row = QHBoxLayout()
+    input_row.addWidget(create_label_with_info(parent, 'input_path', 'input_path_tip'))
+    parent.vid_input_edit = DragLineEdit()
+    input_row.addWidget(parent.vid_input_edit)
+    btn_input = QPushButton(parent.t('browse'))
+    btn_input.clicked.connect(lambda: parent.vid_input_edit.setText(QFileDialog.getOpenFileName(widget, "Select Video", "", "Videos (*.mp4 *.mkv *.avi *.mov)")[0]))
+    input_row.addWidget(btn_input)
+    layout.addLayout(input_row)
+
+    output_row = QHBoxLayout()
+    output_row.addWidget(create_label_with_info(parent, 'output_path', 'output_path_tip'))
+    parent.vid_output_edit = DragLineEdit()
+    output_row.addWidget(parent.vid_output_edit)
+    btn_output = QPushButton(parent.t('browse'))
+    btn_output.clicked.connect(lambda: parent.vid_output_edit.setText(QFileDialog.getExistingDirectory(widget, "Select Output Folder")))
+    output_row.addWidget(btn_output)
+    layout.addLayout(output_row)
 
     model_row = QHBoxLayout()
-    model_container = create_label_with_info(parent, 'model_select', 'model_select_tip')
-    parent.vid_model_label = model_container.label_obj 
-    model_row.addWidget(model_container)
+    model_row.addWidget(create_label_with_info(parent, 'model_select', 'model_select_tip'))
     parent.vid_model_combo = QComboBox()
-    parent.vid_model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-    
-    def refresh_v_models():
-        parent.vid_model_combo.clear()
-        use_cuda = torch.cuda.is_available()
-        pats = ["*.pth"] if use_cuda else ["*.onnx", "*.xml"]
-        files = []
-        for p in pats: 
-            files.extend(glob.glob(os.path.join(weights_dir, "**", p), recursive=True))
-        
-        for f in files: 
-            parent.vid_model_combo.addItem(os.path.basename(f), f)
-            
-        if hasattr(parent, 'vid_log'):
-            log_msg = "🔄 모델 목록이 갱신되었습니다." if parent.language == 'ko' else "🔄 Model list refreshed."
-            parent.vid_log.append(log_msg)
-        
-    refresh_v_models()
+    parent.vid_model_combo.setMinimumWidth(300)
     model_row.addWidget(parent.vid_model_combo)
-    btn_refresh = QPushButton("🔄")
-    btn_refresh.setFixedWidth(40)
-    btn_refresh.clicked.connect(refresh_v_models)
-    model_row.addWidget(btn_refresh)
     layout.addLayout(model_row)
 
-    for key, spin_attr, val in [('split_count', 'vid_split_spin', 10), ('tile_size', 'vid_tile_spin', 800)]:
+    for key, spin_attr, val in [('split_count', 'vid_split_spin', 1), ('tile_size', 'vid_tile_spin', 800)]:
         row = QHBoxLayout()
         container = create_label_with_info(parent, key, f"{key}_tip")
-        if key == 'split_count': 
-            parent.vid_split_label = container.label_obj
-        else: 
-            parent.vid_tile_label = container.label_obj
+        if key == 'split_count': parent.vid_split_label = container.label_obj
+        else: parent.vid_tile_label = container.label_obj
         row.addWidget(container)
-        
         setattr(parent, spin_attr, QSpinBox())
         getattr(parent, spin_attr).setRange(0, 4096)
         getattr(parent, spin_attr).setValue(val)
@@ -393,12 +356,17 @@ def create_video_tab(parent, translations):
     parent.vid_log = QTextEdit()
     parent.vid_log.setReadOnly(True)
     layout.addWidget(parent.vid_log)
-    
-    parent.vid_run_btn = QPushButton(parent.t('run_video_upscale'))
+
+    def refresh_vid_models(show_log=True):
+        log_w = parent.vid_log if show_log and hasattr(parent, 'vid_log') else None
+        refresh_models(parent.vid_model_combo, weights_dir, log_w, parent.language)
+
+    parent.refresh_vid_models = refresh_vid_models
+
+    parent.vid_run_btn = QPushButton(parent.t('upscale_video'))
     parent.vid_run_btn.setFixedHeight(40)
     parent.vid_run_btn.clicked.connect(parent.run_video_upscale)
     layout.addWidget(parent.vid_run_btn)
 
-    tab = QWidget()
-    tab.setLayout(layout)
-    return tab
+    refresh_vid_models()
+    return widget

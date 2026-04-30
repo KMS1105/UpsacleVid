@@ -8,12 +8,13 @@ import urllib.request
 import glob
 from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-    QComboBox, QProgressBar, QTextEdit, QVBoxLayout, QApplication, QSpinBox, QSizePolicy
+    QComboBox, QProgressBar, QTextEdit, QVBoxLayout, QApplication, 
+    QSpinBox, QSizePolicy, QFileDialog
 )
 from PyQt5.QtCore import QThread, pyqtSignal, Qt, QTimer
 from setting import (
     UI_TEXTS, get_device_info_text, 
-    get_device_recommendation, prepare_model, DragLineEdit
+    get_device_recommendation, prepare_model, refresh_models, DragLineEdit
 )
 from launch import UpscaleApp
 
@@ -122,92 +123,73 @@ def create_label_with_info(parent, text_key, tip_key):
     return container
 
 def create_image_tab(parent, translations):
-    layout = QVBoxLayout()
-    
+    widget = QWidget()
+    layout = QVBoxLayout(widget)
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     weights_dir = os.path.join(base_dir, 'weights')
-    os.makedirs(weights_dir, exist_ok=True)
 
-    input_layout = QHBoxLayout()
-    input_container = create_label_with_info(parent, 'input_image', 'input_image_tip')
-    parent.img_input_label = input_container.label_obj
-    input_layout.addWidget(input_container)
-    
-    parent.img_input_edit = QLineEdit('')
-    input_layout.addWidget(parent.img_input_edit)
-    parent.img_browse_btn = QPushButton(parent.t('browse'))
-    parent.img_browse_btn.clicked.connect(parent.browse_image_input)
-    input_layout.addWidget(parent.img_browse_btn)
-    layout.addLayout(input_layout)
+    input_row = QHBoxLayout()
+    input_row.addWidget(QLabel(parent.t('input_path')))
+    parent.img_input_edit = DragLineEdit()
+    input_row.addWidget(parent.img_input_edit)
+    btn_input = QPushButton(parent.t('browse'))
+    btn_input.clicked.connect(lambda: parent.img_input_edit.setText(QFileDialog.getOpenFileName(widget, "Select Image", "", "Images (*.png *.jpg *.jpeg *.webp)")[0]))
+    input_row.addWidget(btn_input)
+    layout.addLayout(input_row)
 
-    output_layout = QHBoxLayout()
-    output_container = create_label_with_info(parent, 'output_folder', 'output_folder_tip')
-    parent.img_output_label = output_container.label_obj
-    output_layout.addWidget(output_container)
-    
-    parent.img_output_edit = QLineEdit('')
-    output_layout.addWidget(parent.img_output_edit)
-    parent.img_output_browse_btn = QPushButton(parent.t('browse'))
-    parent.img_output_browse_btn.clicked.connect(parent.browse_output_folder)
-    output_layout.addWidget(parent.img_output_browse_btn)
-    layout.addLayout(output_layout)
+    output_row = QHBoxLayout()
+    output_row.addWidget(QLabel(parent.t('output_path')))
+    parent.img_output_edit = DragLineEdit()
+    output_row.addWidget(parent.img_output_edit)
+    btn_output = QPushButton(parent.t('browse'))
+    btn_output.clicked.connect(lambda: parent.img_output_edit.setText(QFileDialog.getExistingDirectory(widget, "Select Output Folder")))
+    output_row.addWidget(btn_output)
+    layout.addLayout(output_row)
 
-    model_sel_layout = QHBoxLayout()
-    model_container = create_label_with_info(parent, 'model_select', 'model_select_tip')
-    parent.img_model_label = model_container.label_obj
-    model_sel_layout.addWidget(model_container)
-    
+    model_row = QHBoxLayout()
+    model_row.addWidget(QLabel(parent.t('model_select')))
     parent.img_model_combo = QComboBox()
-    parent.img_model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    parent.img_model_combo.setMinimumWidth(300)
+    model_row.addWidget(parent.img_model_combo)
+    layout.addLayout(model_row)
 
-    def refresh_models():
-        parent.img_model_combo.clear()
-        use_cuda = torch.cuda.is_available()
-        pats = ["*.pth"] if use_cuda else ["*.onnx", "*.xml"]
-        files = []
-        for p in pats: 
-            files.extend(glob.glob(os.path.join(weights_dir, "**", p), recursive=True))
-        
-        for f in files: 
-            parent.img_model_combo.addItem(os.path.basename(f), f)
-            
-        if hasattr(parent, 'img_log'):
-            log_msg = "🔄 모델 목록이 갱신되었습니다." if parent.language == 'ko' else "🔄 Model list refreshed."
-            parent.img_log.append(log_msg)
-
-    model_sel_layout.addWidget(parent.img_model_combo)
-    
-    btn_refresh = QPushButton("🔄")
-    btn_refresh.setFixedWidth(40)
-    btn_refresh.clicked.connect(refresh_models)
-    model_sel_layout.addWidget(btn_refresh)
-    
-    refresh_models()
-
-    tile_container = create_label_with_info(parent, 'tile_size', 'tile_size_tip')
-    parent.img_tile_label = tile_container.label_obj
-    model_sel_layout.addWidget(tile_container)
-    
+    tile_row = QHBoxLayout()
+    tile_row.addWidget(QLabel(parent.t('tile_size')))
     parent.img_tile_spin = QSpinBox()
-    parent.img_tile_spin.setRange(0, 1024)
-    parent.img_tile_spin.setValue(400)
-    parent.img_tile_spin.setSingleStep(100)
-    model_sel_layout.addWidget(parent.img_tile_spin)
-    layout.addLayout(model_sel_layout)
+    parent.img_tile_spin.setRange(0, 4096)
+    parent.img_tile_spin.setValue(800)
+    tile_row.addWidget(parent.img_tile_spin)
+    layout.addLayout(tile_row)
 
-    from setting import get_device_recommendation
     parent.img_recommend_label = QLabel(get_device_recommendation(parent.language))
     layout.addWidget(parent.img_recommend_label)
     
     parent.img_progress = QProgressBar()
     layout.addWidget(parent.img_progress)
+
     parent.img_log = QTextEdit()
     parent.img_log.setReadOnly(True)
     layout.addWidget(parent.img_log)
 
+    def refresh_img_models():
+        refresh_models(parent.img_model_combo, weights_dir, parent.img_log, parent.language)
+        if hasattr(parent, 'refresh_vid_models'):
+            parent.refresh_vid_models(show_log=False)
+
+    parent.refresh_img_models = refresh_img_models
+
+    def on_setup_finished():
+        refresh_img_models()
+        if hasattr(parent, 'img_log'):
+            parent.img_log.append(parent.t('log_setup_finished'))
+
+    parent.setup_worker = ModelSetupWorker(weights_dir, parent.language)
+    parent.setup_worker.log.connect(parent.img_log.append)
+    parent.setup_worker.finished.connect(on_setup_finished)
+
     parent.img_run_btn = QPushButton(parent.t('upscale_image'))
     parent.img_run_btn.setFixedHeight(40)
-
+    
     def start_upscale():
         input_path = parent.img_input_edit.text()
         output_folder = parent.img_output_edit.text()
@@ -215,13 +197,7 @@ def create_image_tab(parent, translations):
         tile_size = parent.img_tile_spin.value()
         if not input_path or not os.path.exists(input_path): return
         parent.img_run_btn.setEnabled(False)
-        parent.img_worker = ImageUpscaleWorker(
-            input_path, 
-            output_folder, 
-            model_path, 
-            tile_size, 
-            lang=parent.language
-        )
+        parent.img_worker = ImageUpscaleWorker(input_path, output_folder, model_path, tile_size, lang=parent.language)
         parent.img_worker.progress.connect(parent.img_progress.setValue)
         parent.img_worker.log.connect(parent.img_log.append)
         parent.img_worker.finished.connect(parent.on_image_finished)
@@ -230,11 +206,6 @@ def create_image_tab(parent, translations):
     parent.img_run_btn.clicked.connect(start_upscale)
     layout.addWidget(parent.img_run_btn)
 
-    parent.setup_worker = ModelSetupWorker(weights_dir)
-    parent.setup_worker.log.connect(parent.img_log.append)
-    parent.setup_worker.finished.connect(refresh_models)
-    QTimer.singleShot(500, parent.setup_worker.start)
-
-    tab = QWidget()
-    tab.setLayout(layout)
-    return tab
+    refresh_img_models()
+    parent.setup_worker.start()
+    return widget
