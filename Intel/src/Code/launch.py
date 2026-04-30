@@ -413,10 +413,11 @@ class UpscaleApp(QMainWindow):
                 self.vid_worker.start()
             else:
                 self.vid_run_btn.setEnabled(True)
-                self.vid_log.append(self.t('log_ffmpeg_fail')) 
+                timestamp = time.strftime('%H:%M:%S')
+                self.vid_log.append(f"[{timestamp}] {self.t('log_ffmpeg_fail')}")
 
         self.ensure_ffmpeg(
-            log_func=self.vid_log.append, 
+            log_func=lambda msg: self.vid_log.append(f"[{time.strftime('%H:%M:%S')}] {msg}"), 
             progress_func=self.vid_progress.setValue, 
             finished_callback=on_ffmpeg_ready
         )
