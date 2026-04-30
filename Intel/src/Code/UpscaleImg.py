@@ -131,9 +131,21 @@ def create_image_tab(parent, translations):
     input_row = QHBoxLayout()
     input_row.addWidget(QLabel(parent.t('input_path')))
     parent.img_input_edit = DragLineEdit()
+    
+    def on_img_input_changed(path):
+        if path and os.path.exists(path):
+            parent.img_output_edit.setText(os.path.dirname(path))
+            
+    parent.img_input_edit.dropped.connect(on_img_input_changed)
     input_row.addWidget(parent.img_input_edit)
+    
     btn_input = QPushButton(parent.t('browse'))
-    btn_input.clicked.connect(lambda: parent.img_input_edit.setText(QFileDialog.getOpenFileName(widget, "Select Image", "", "Images (*.png *.jpg *.jpeg *.webp)")[0]))
+    def browse_image():
+        path, _ = QFileDialog.getOpenFileName(widget, "Select Image", "", "Images (*.png *.jpg *.jpeg *.webp)")
+        if path:
+            parent.img_input_edit.setText(path)
+            parent.img_output_edit.setText(os.path.dirname(path))
+    btn_input.clicked.connect(browse_image)
     input_row.addWidget(btn_input)
     layout.addLayout(input_row)
 

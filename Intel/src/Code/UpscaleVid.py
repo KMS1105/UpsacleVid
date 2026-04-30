@@ -15,27 +15,7 @@ from PyQt5.QtWidgets import (
     QLineEdit, QSpinBox, QComboBox, QTextEdit, 
     QProgressBar, QVBoxLayout, QSizePolicy, QFileDialog)
 from PyQt5.QtCore import QThread, pyqtSignal, Qt, QTimer
-from setting import UI_TEXTS, refresh_models
-
-class DragLineEdit(QLineEdit):
-    dropped = pyqtSignal(str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.accept()
-        else:
-            event.ignore()
-
-    def dropEvent(self, event):
-        files = [u.toLocalFile() for u in event.mimeData().urls()]
-        if files:
-            path = files[0]
-            self.setText(path)
-            self.dropped.emit(path)
+from setting import UI_TEXTS, refresh_models, DragLineEdit
 
 class ModelSetupWorker(QThread):
     log = pyqtSignal(str)
@@ -304,9 +284,21 @@ def create_video_tab(parent, translations):
     input_row = QHBoxLayout()
     input_row.addWidget(create_label_with_info(parent, 'input_path', 'input_path_tip'))
     parent.vid_input_edit = DragLineEdit()
+    
+    def on_vid_input_changed(path):
+        if path and os.path.exists(path):
+            parent.vid_output_edit.setText(os.path.dirname(path))
+    
+    parent.vid_input_edit.dropped.connect(on_vid_input_changed)
     input_row.addWidget(parent.vid_input_edit)
+    
     btn_input = QPushButton(parent.t('browse'))
-    btn_input.clicked.connect(lambda: parent.vid_input_edit.setText(QFileDialog.getOpenFileName(widget, "Select Video", "", "Videos (*.mp4 *.mkv *.avi *.mov)")[0]))
+    def browse_video():
+        path, _ = QFileDialog.getOpenFileName(widget, "Select Video", "", "Videos (*.mp4 *.mkv *.avi *.mov)")
+        if path:
+            parent.vid_input_edit.setText(path)
+            parent.vid_output_edit.setText(os.path.dirname(path))
+    btn_input.clicked.connect(browse_video)
     input_row.addWidget(btn_input)
     layout.addLayout(input_row)
 
