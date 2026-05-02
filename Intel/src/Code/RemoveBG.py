@@ -43,11 +43,9 @@ class RemoveBGWorker(QThread):
                     except:
                         return core.compile_model(path, "CPU")
 
-            # MODNet load
             modnet = load(model_paths["modnet"])
             edge_model = None
-            
-            # Edge model load
+
             if "model_fp16" in model_paths:
                 try:
                     edge_model = load(model_paths["model_fp16"])
@@ -64,8 +62,6 @@ class RemoveBGWorker(QThread):
 
             try:
                 os.environ["OMP_NUM_THREADS"] = "4"
-                
-                # U^2-Net(rembg) create session
                 rembg_session = new_session("u2net", providers=["CPUExecutionProvider"])
             except:
                 rembg_session = new_session()
@@ -80,56 +76,67 @@ class RemoveBGWorker(QThread):
 
                 img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
+                # ---------------- 1. 모델 추론 ----------------
                 img_m = cv2.resize(img, (1024, 1024)).astype(np.float32) / 255.0
                 inp_m = img_m.transpose(2, 0, 1)[None]
-                
-                #  MODNet model inference
                 alpha = list(modnet([inp_m]).values())[0].squeeze()
                 alpha = cv2.resize(alpha, (w, h))
 
+                rembg_result = remove(img, session=rembg_session)
+                rembg_alpha = rembg_result[:, :, 3].astype(np.float32) / 255.0
+                rembg_alpha = cv2.resize(rembg_alpha, (w, h))
+
+                # 마스크 병합
+                alpha = np.maximum(alpha, rembg_alpha * 0.8)
                 alpha = np.clip(alpha, 0, 1)
 
+                # ---------------- 2. 적응형 시간적 안정화 ----------------
                 if prev_alpha is not None:
-                    alpha = 0.7 * alpha + 0.3 * prev_alpha
-                prev_alpha = alpha.copy()
+                    diff = np.abs(alpha - prev_alpha)
+                    mean_diff = np.mean(diff)
 
-                alpha[alpha < 0.01] = 0
-                alpha = np.clip(alpha, 0, 1)
+                    if mean_diff > 0.05:
+                        # [개선] 순간적인 큰 움직임 발생 시 이전 프레임의 잔상을 남기지 않고 즉각 반영
+                        alpha = 0.85 * alpha + 0.15 * prev_alpha
+                    else:
+                        # 너무 크게 튀는 픽셀값만 이전 프레임 값으로 제한
+                        alpha = np.where(diff > 0.35, prev_alpha, alpha)
+                        alpha = 0.6 * alpha + 0.4 * prev_alpha
 
+                # ---------------- 3. 공간적 평활화 및 얼룩 제거 ----------------
+                kernel = np.ones((5, 5), np.uint8) # [개선] 커널 크기를 늘려 얼룩 제거 강화
+                alpha_uint8 = (alpha * 255).astype(np.uint8)
+                
+                # 열림(Open) 연산 적용
+                alpha_uint8 = cv2.morphologyEx(alpha_uint8, cv2.MORPH_OPEN, kernel)
+                
+                alpha = alpha_uint8.astype(np.float32) / 255.0
+                alpha = cv2.GaussianBlur(alpha, (3, 3), 0)
+
+                # ---------------- 4. edge refinement ----------------
                 if edge_model is not None:
                     img_e = cv2.resize(img, (1024, 1024)).astype(np.float32) / 255.0
                     inp_e = img_e.transpose(2, 0, 1)[None]
                     edge = list(edge_model([inp_e]).values())[0].squeeze()
                     edge = cv2.resize(edge, (w, h))
-                    edge_mask = (alpha > 0.1) & (alpha < 0.9)
+                    edge_mask = (alpha > 0.05) & (alpha < 0.95)
+                    alpha[edge_mask] = 0.85 * alpha[edge_mask] + 0.15 * edge[edge_mask]
 
-                    alpha[edge_mask] = (
-                        0.9 * alpha[edge_mask] +
-                        0.1 * edge[edge_mask]
-                    )
-
-                alpha = np.clip(alpha, 0, 1)
-
-                # U^2-Net(rembg) model inference
-                rembg_result = remove(img, session=rembg_session)
-                rembg_alpha = rembg_result[:, :, 3].astype(np.float32) / 255.0
-                rembg_alpha = cv2.resize(rembg_alpha, (w, h))
-                rembg_alpha = np.clip(rembg_alpha, 0, 1)
-
-                internal_mask = (rembg_alpha >= 0.15)
-                alpha[internal_mask] = np.maximum(alpha[internal_mask], rembg_alpha[internal_mask])
-
-                kernel_size = 5  
-                kernel = np.ones((kernel_size, kernel_size), np.uint8)
+                # ---------------- 5. hole filling ----------------
                 alpha_uint8 = (alpha * 255).astype(np.uint8)
-                dilated_alpha = cv2.dilate(alpha_uint8, kernel, iterations=1)
-                alpha = dilated_alpha.astype(np.float32) / 255.0
+                alpha_uint8 = cv2.morphologyEx(alpha_uint8, cv2.MORPH_CLOSE, kernel)
+                alpha = alpha_uint8.astype(np.float32) / 255.0
 
+                # ---------------- 6. 최종 임계값 처리 ----------------
+                # [개선] 얼룩 방지를 위해 0.35 이하의 반투명 값 강제 제거
+                alpha[alpha < 0.35] = 0
                 alpha = np.clip(alpha, 0, 1)
 
+                # ---------------- 7. 최종 출력 ----------------
                 result = (frame * alpha[..., None]).astype(np.uint8)
                 out.write(result)
 
+                prev_alpha = alpha.copy()
                 i += 1
 
                 if i % 10 == 0 or i == total:
@@ -194,7 +201,7 @@ class RemoveBGTab(QWidget):
 
     def update_default_output(self, file_path):
         self.output_edit.setText(os.path.dirname(file_path))
-        
+
     def update_ui_texts(self):
         self.run_btn.setText(self.parent.t('rbg_start_btn'))
         self.browse_btn.setText(self.parent.t('browse'))

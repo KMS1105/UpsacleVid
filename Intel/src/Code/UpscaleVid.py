@@ -221,7 +221,7 @@ def run_split_upscale(
                 f.write(f"file '{os.path.abspath(ts_file)}'\n")
         
         merge_cmd = [
-            'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', list_file_path,
+            ffmpeg_bin, '-y', '-f', 'concat', '-safe', '0', '-i', list_file_path,
             '-i', input_path, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
             '-map', '0:v', '-map', '1:a?', '-vsync', 'cfr', '-f', 'mp4', final_merged_path
         ]
@@ -320,7 +320,7 @@ def create_video_tab(parent, translations):
     model_row.addWidget(parent.vid_model_combo)
     layout.addLayout(model_row)
 
-    for key, spin_attr, val in [('split_count', 'vid_split_spin', 1), ('tile_size', 'vid_tile_spin', 800)]:
+    for key, spin_attr, val in [('split_count', 'vid_split_spin', 10), ('tile_size', 'vid_tile_spin', 800)]:
         row = QHBoxLayout()
         container = create_label_with_info(parent, key, f"{key}_tip")
         if key == 'split_count': parent.vid_split_label = container.label_obj
