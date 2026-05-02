@@ -11,6 +11,11 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from setting import prepare_bg_model, DragLineEdit
 from rembg import remove, new_session
 
+rvm_weights_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+u2net_dir = os.path.join(rvm_weights_dir, 'RemBG')
+os.environ["HF_HOME"] = rvm_weights_dir
+os.environ["U2NET_HOME"] = u2net_dir
+
 
 class RemoveBGWorker(QThread):
     progress = pyqtSignal(int)
@@ -30,28 +35,19 @@ class RemoveBGWorker(QThread):
             self.log.emit("model_loading")
             core = ov.Core()
 
+            # 모델 로딩 설정
+            rvm_model_path = os.path.join(rvm_weights_dir, "robust-video-matting-mobilenetv3")
             model_paths = prepare_bg_model(lambda m: self.log.emit(m))
-            if not model_paths:
-                return
-
+            
             def load(path):
-                try:
-                    return core.compile_model(path, "GPU.1")
+                try: return core.compile_model(path, "GPU.1")
                 except:
-                    try:
-                        return core.compile_model(path, "GPU.0")
-                    except:
-                        return core.compile_model(path, "CPU")
+                    try: return core.compile_model(path, "GPU.0")
+                    except: return core.compile_model(path, "CPU")
 
-            modnet = load(model_paths["modnet"])
-            edge_model = None
-
-            if "model_fp16" in model_paths:
-                try:
-                    edge_model = load(model_paths["model_fp16"])
-                except:
-                    edge_model = None
-
+            rvm_model = load(rvm_model_path) if os.path.exists(rvm_model_path) else \
+                        (load(model_paths["modnet"]) if model_paths and "modnet" in model_paths else None)
+            
             cap = cv2.VideoCapture(self.input_path)
             w, h = int(cap.get(3)), int(cap.get(4))
             fps = cap.get(5)
@@ -67,82 +63,92 @@ class RemoveBGWorker(QThread):
                 rembg_session = new_session()
 
             prev_alpha = None
+            prev_hsv = None
             i = 0
 
             while i < total:
                 ret, frame = cap.read()
-                if not ret:
-                    break
+                if not ret: break
 
-                img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                img_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-                # ---------------- 1. 모델 추론 ----------------
-                img_m = cv2.resize(img, (1024, 1024)).astype(np.float32) / 255.0
-                inp_m = img_m.transpose(2, 0, 1)[None]
-                alpha = list(modnet([inp_m]).values())[0].squeeze()
-                alpha = cv2.resize(alpha, (w, h))
+                # 1. 모델 추론 (MODNet 허용 범위 0.2로 확장 적용)
+                main_alpha = None
+                if rvm_model:
+                    inp = cv2.resize(img_rgb, (1024, 1024)).astype(np.float32) / 255.0
+                    inp = inp.transpose(2, 0, 1)[None]
+                    res = list(rvm_model([inp]).values())
+                    main_alpha = res[1].squeeze() if len(res) > 1 else res[0].squeeze()
+                    main_alpha = cv2.resize(main_alpha, (w, h))
 
-                rembg_result = remove(img, session=rembg_session)
-                rembg_alpha = rembg_result[:, :, 3].astype(np.float32) / 255.0
-                rembg_alpha = cv2.resize(rembg_alpha, (w, h))
+                res_rembg = remove(img_rgb, session=rembg_session)
+                rembg_alpha = cv2.resize(res_rembg[:, :, 3].astype(np.float32) / 255.0, (w, h))
 
-                # 마스크 병합
-                alpha = np.maximum(alpha, rembg_alpha * 0.8)
-                alpha = np.clip(alpha, 0, 1)
+                confidence = np.abs(rembg_alpha - main_alpha) if main_alpha is not None else np.zeros_like(rembg_alpha)
 
-                # ---------------- 2. 적응형 시간적 안정화 ----------------
+                if main_alpha is not None:
+                    current_alpha = np.where((main_alpha > 0.20) & (rembg_alpha > 0.20), rembg_alpha, np.maximum(main_alpha, rembg_alpha))
+                else:
+                    current_alpha = rembg_alpha
+
+                current_alpha = np.clip(current_alpha, 0, 1)
+
+                # 2. 채도 및 명도 기반 연속성 분석
+                alpha_influence = 0.3
+                if prev_hsv is not None:
+                    diff_hsv = cv2.absdiff(img_hsv, prev_hsv)
+                    s_diff = np.mean(diff_hsv[:, :, 1]) / 255.0
+                    v_diff = np.mean(diff_hsv[:, :, 2]) / 255.0
+                    if (s_diff + v_diff) < 0.05:
+                        alpha_influence = 0.7
+
                 if prev_alpha is not None:
-                    diff = np.abs(alpha - prev_alpha)
-                    mean_diff = np.mean(diff)
+                    alpha = (1.0 - alpha_influence) * current_alpha + alpha_influence * prev_alpha
+                else:
+                    alpha = current_alpha
 
-                    if mean_diff > 0.05:
-                        # [개선] 순간적인 큰 움직임 발생 시 이전 프레임의 잔상을 남기지 않고 즉각 반영
-                        alpha = 0.85 * alpha + 0.15 * prev_alpha
-                    else:
-                        # 너무 크게 튀는 픽셀값만 이전 프레임 값으로 제한
-                        alpha = np.where(diff > 0.35, prev_alpha, alpha)
-                        alpha = 0.6 * alpha + 0.4 * prev_alpha
+                # 3. 이진화 (반투명 얼룩 방지)
+                alpha = np.where(alpha >= 0.5, 1.0, 0.0)
 
-                # ---------------- 3. 공간적 평활화 및 얼룩 제거 ----------------
-                kernel = np.ones((5, 5), np.uint8) # [개선] 커널 크기를 늘려 얼룩 제거 강화
-                alpha_uint8 = (alpha * 255).astype(np.uint8)
-                
-                # 열림(Open) 연산 적용
-                alpha_uint8 = cv2.morphologyEx(alpha_uint8, cv2.MORPH_OPEN, kernel)
-                
-                alpha = alpha_uint8.astype(np.float32) / 255.0
-                alpha = cv2.GaussianBlur(alpha, (3, 3), 0)
+                # 4. 테두리 추출
+                alpha_u8 = (alpha * 255).astype(np.uint8)
+                edges = cv2.Canny(alpha_u8, 100, 200)
+                edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
 
-                # ---------------- 4. edge refinement ----------------
-                if edge_model is not None:
-                    img_e = cv2.resize(img, (1024, 1024)).astype(np.float32) / 255.0
-                    inp_e = img_e.transpose(2, 0, 1)[None]
-                    edge = list(edge_model([inp_e]).values())[0].squeeze()
-                    edge = cv2.resize(edge, (w, h))
-                    edge_mask = (alpha > 0.05) & (alpha < 0.95)
-                    alpha[edge_mask] = 0.85 * alpha[edge_mask] + 0.15 * edge[edge_mask]
+                # 5. 닫힌/열린 테두리 분석
+                contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                mask_for_fill = np.zeros_like(alpha_u8)
 
-                # ---------------- 5. hole filling ----------------
-                alpha_uint8 = (alpha * 255).astype(np.uint8)
-                alpha_uint8 = cv2.morphologyEx(alpha_uint8, cv2.MORPH_CLOSE, kernel)
-                alpha = alpha_uint8.astype(np.float32) / 255.0
+                for cnt in contours:
+                    perimeter = cv2.arcLength(cnt, True)
+                    if perimeter > 0:
+                        # 튜플 타입 오류가 발생하지 않도록 isContourConvex 및 기본 면적/둘레 조건으로만 판단하도록 수정
+                        approx = cv2.approxPolyDP(cnt, 0.02 * perimeter, True)
+                        is_closed = cv2.isContourConvex(approx) or (cv2.contourArea(cnt) > 50)
+                        
+                        if is_closed:
+                            cv2.drawContours(mask_for_fill, [cnt], -1, 1, thickness=-1)
 
-                # ---------------- 6. 최종 임계값 처리 ----------------
-                # [개선] 얼룩 방지를 위해 0.35 이하의 반투명 값 강제 제거
-                alpha[alpha < 0.35] = 0
-                alpha = np.clip(alpha, 0, 1)
+                alpha = np.where(mask_for_fill > 0, 1.0, alpha)
 
-                # ---------------- 7. 최종 출력 ----------------
+                # 6. 결과 합성 및 테두리 색상 처리
                 result = (frame * alpha[..., None]).astype(np.uint8)
+
+                edge_y, edge_x = np.where(edges > 0)
+                for ey, ex in zip(edge_y, edge_x):
+                    if confidence[ey, ex] > 0.3:
+                        result[ey, ex] = [0, 0, 255] # Red
+                    else:
+                        result[ey, ex] = [255, 255, 0] # Cyan
+
                 out.write(result)
-
-                prev_alpha = alpha.copy()
+                
+                prev_alpha = alpha
+                prev_hsv = img_hsv
                 i += 1
-
                 if i % 10 == 0 or i == total:
-                    p = int(i * 100 / total)
-                    self.progress.emit(p)
-                    self.log.emit(f"processing {i}/{total} {p}%")
+                    self.progress.emit(int(i * 100 / total))
 
             self.log.emit("done")
 
