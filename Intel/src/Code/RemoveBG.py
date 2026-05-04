@@ -67,16 +67,16 @@ class RemoveBGWorker(QThread):
 
             while i < total:
                 ret, frame = cap.read()
-                if not ret: break
+                if not ret:
+                    break
 
                 img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 img_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-
                 main_alpha = None
                 if rvm_model:
-                    inp = cv2.resize(img_rgb, (1024, 1024)).astype(np.float32) / 255.0
+                    inp = cv2.resize(img_rgb, (512, 512)).astype(np.float32) / 255.0
                     inp = inp.transpose(2, 0, 1)[None]
                     res = list(rvm_model([inp]).values())
                     main_alpha = res[1].squeeze() if len(res) > 1 else res[0].squeeze()
@@ -85,43 +85,41 @@ class RemoveBGWorker(QThread):
                 res_rembg = remove(img_rgb, session=rembg_session)
                 rembg_alpha = cv2.resize(res_rembg[:, :, 3].astype(np.float32) / 255.0, (w, h))
 
-                current_alpha = np.maximum(main_alpha, rembg_alpha) if main_alpha is not None else rembg_alpha
-                current_alpha = np.clip(current_alpha, 0, 1)
-
-                if prev_hsv is not None:
-                    diff = cv2.absdiff(img_hsv, prev_hsv)
-                    motion_map = (diff[:,:,1].astype(np.float32) + diff[:,:,2].astype(np.float32)) / 255.0
-                    motion_mask = motion_map > 0.15
-
-                    if prev_alpha is not None:
-                        alpha_A = current_alpha.copy()
-                        alpha_A[~motion_mask] = 0.7 * prev_alpha[~motion_mask] + 0.3 * current_alpha[~motion_mask]
-                    else:
-                        alpha_A = current_alpha
+                if main_alpha is not None:
+                    conf = cv2.GaussianBlur(main_alpha, (11, 11), 0)
+                    alpha_A = conf * main_alpha + (1 - conf) * rembg_alpha
                 else:
-                    alpha_A = current_alpha
+                    alpha_A = rembg_alpha
 
-                alpha_A = cv2.GaussianBlur(alpha_A, (5,5), 0)
+                alpha_A = np.clip(alpha_A, 0, 1)
 
-                edges = cv2.Canny(gray, 50, 150)
-                edges = cv2.dilate(edges, np.ones((3,3), np.uint8), iterations=2)
 
-                edges_closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((5,5), np.uint8))
+                sat = img_hsv[:, :, 1].astype(np.float32) / 255.0
+                val = img_hsv[:, :, 2].astype(np.float32) / 255.0
+                low_sv = ((sat < 0.25) & (val < 0.35)).astype(np.float32)
+                alpha_A = np.clip(alpha_A + 0.25 * low_sv * alpha_A, 0, 1)
 
-                contours, _ = cv2.findContours(edges_closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if prev_alpha is not None:
+                    alpha_A = 0.85 * alpha_A + 0.15 * prev_alpha
+
+                alpha_A = cv2.GaussianBlur(alpha_A, (3, 3), 0)
+
+                edges = cv2.Canny(gray, 30, 100)
+                edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2)
+
+                contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 fill_mask = np.zeros((h, w), np.uint8)
 
                 for cnt in contours:
-                    if cv2.contourArea(cnt) > 500: 
+                    if cv2.contourArea(cnt) > 1200:
                         cv2.drawContours(fill_mask, [cnt], -1, 255, -1)
 
                 alpha_B = fill_mask.astype(np.float32) / 255.0
-                alpha = np.maximum(alpha_A, alpha_B * 0.8)
 
-                alpha_u8 = (alpha * 255).astype(np.uint8)
-                _, alpha_bin = cv2.threshold(alpha_u8, 128, 255, cv2.THRESH_BINARY)
+                alpha = np.clip(alpha_A + 0.25 * alpha_B, 0, 1)
 
-                alpha = alpha_bin.astype(np.float32) / 255.0
+                alpha = cv2.GaussianBlur(alpha, (3, 3), 0)
+                alpha = cv2.medianBlur((alpha * 255).astype(np.uint8), 5) / 255.0
 
                 result = (frame * alpha[..., None]).astype(np.uint8)
                 out.write(result)
